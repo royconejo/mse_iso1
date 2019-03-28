@@ -29,6 +29,23 @@ static void initHardware ()
 	Board_Init ();
 	SystemCoreClockUpdate ();
 	SysTick_Config (SystemCoreClock / 1000);
+    // Minima prioridad a PendSV
+    NVIC_SetPriority (PendSV_IRQn, (1 << __NVIC_PRIO_BITS) - 1);
+}
+
+
+static void schedule ()
+{
+    __ISB ();
+    __DSB ();
+
+    SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+}
+
+
+void Systick_Handle ()
+{
+    schedule ();
 }
 
 
@@ -130,7 +147,6 @@ int main ()
 	init_stack (stack_2, STACK_SIZE, &sp_2, task2, (void *)0xCACACACA);
 
 	initHardware ();
-
 
 	while (1)
     {
