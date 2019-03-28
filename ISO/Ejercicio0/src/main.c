@@ -43,7 +43,7 @@ static void schedule ()
 }
 
 
-void Systick_Handle ()
+void SysTick_Handler ()
 {
     schedule ();
 }
