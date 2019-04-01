@@ -103,10 +103,25 @@ struct OS_TaskControl
     OS_Cycles               cycles;
     enum OS_TaskPriority    priority;
     enum OS_TaskState       state;
+    // TODO: cambiar a OS_GenericNode
     struct OS_TaskControl   *prev;
     struct OS_TaskControl   *next;
     uint32_t                sp;
     uint32_t                stackBarrier;
+};
+
+
+struct OS_GenericNode
+{
+    struct OS_GenericNode   *prev;
+    struct OS_GenericNode   *next;
+};
+
+
+struct OS_GenericQueue
+{
+    struct OS_GenericNode   *head;
+    struct OS_GenericNode   *tail;
 };
 
 
