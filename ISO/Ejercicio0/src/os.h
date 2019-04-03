@@ -30,6 +30,8 @@
 */
 #pragma once
 
+#include "queue.h"
+#include "semaphore.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -45,7 +47,8 @@ typedef void            (*OS_TickHook) (OS_Ticks ticks);
 #define OS_IntegerRegisters     17
 #define OS_FPointRegisters      (16 + 1 + 16)
 #define OS_ContextRegisters     (OS_FPointRegisters + OS_IntegerRegisters)
-// NOTE: this number must be big enough to be able to execute the scheduler!
+// NOTE: this number must be big enough for any task to be able to execute the
+//       scheduler!
 #define OS_MinAppStackSize      128
 #define OS_TaskMinBufferSize    (sizeof(struct OS_TaskControl) \
                                             + (OS_ContextRegisters * 4) \
@@ -79,14 +82,16 @@ enum OS_TaskPriority
     OS_TaskPriorityLevels,
     OS_TaskPriorityHighest  = OS_TaskPriorityLevel0,
     OS_TaskPriorityLowest   = OS_TaskPriorityLevel6,
-    OS_TaskPriorityIdle     = OS_TaskPriorityLevel7
+    OS_TaskPriorityIdle     = OS_TaskPriorityLevel7,
+    OS_TaskPriority__BEGIN  = OS_TaskPriorityLevel0,
+    OS_TaskPriority__COUNT  = OS_TaskPriorityLevels
 };
 
 
 enum OS_TaskState
 {
     OS_TaskState_Terminated,
-    OS_TaskState_Suspended,
+    OS_TaskState_Waiting,
     OS_TaskState_Ready,
     OS_TaskState_Running
 };
@@ -94,55 +99,34 @@ enum OS_TaskState
 
 struct OS_TaskControl
 {
-    uint32_t                retValue;
+    struct QUEUE_Node       node;
     uint32_t                size;
-    OS_Ticks                startedAtTicks;
-    OS_Ticks                terminatedAtTicks;
-    OS_Ticks                suspendedUntilTicks;
-    OS_Ticks                lastSuspensionTicks;
+    uint32_t                retValue;
+    OS_Ticks                startedAt;
+    OS_Ticks                terminatedAt;
+    OS_Ticks                suspendedUntil;
+    OS_Ticks                lastSuspension;
+    struct SEMAPHORE        *signalWaiting;
     OS_Cycles               cycles;
     enum OS_TaskPriority    priority;
     enum OS_TaskState       state;
-    // TODO: cambiar a OS_GenericNode
-    struct OS_TaskControl   *prev;
-    struct OS_TaskControl   *next;
     uint32_t                sp;
     uint32_t                stackBarrier;
 };
 
 
-struct OS_GenericNode
-{
-    struct OS_GenericNode   *prev;
-    struct OS_GenericNode   *next;
-};
-
-
-struct OS_GenericQueue
-{
-    struct OS_GenericNode   *head;
-    struct OS_GenericNode   *tail;
-};
-
-
-struct OS_TaskControlEnds
-{
-    struct OS_TaskControl   *firstTask;
-    struct OS_TaskControl   *lastTask;
-};
-
-
 struct OS
 {
-   OS_Ticks                     startedAtTicks;
-   OS_Cycles                    schedulerCycles;
+   OS_Ticks                 startedAt;
+   OS_Cycles                schedulerRun;
    // The only one task in the RUNNING state
-   struct OS_TaskControl        *currentTask;
+   struct OS_TaskControl    *currentTask;
    // Tasks in READY state
-   struct OS_TaskControlEnds    tasksReady[OS_TaskPriorityLevels];
-   // Tasks in every other state
-   struct OS_TaskControlEnds    tasksSuspended[OS_TaskPriorityLevels];
-   uint8_t                      idleTaskBuffer[OS_TaskMinBufferSize];
+   struct QUEUE             tasksReady[OS_TaskPriorityLevels];
+   // Tasks in any other state
+   struct QUEUE             tasksWaiting[OS_TaskPriorityLevels];
+   // Idle task buffer (this task is internal and belongs to the OS)
+   uint8_t                  idleTaskBuffer[OS_TaskMinBufferSize];
 };
 
 
@@ -152,6 +136,7 @@ enum OS_Result  OS_TaskStart            (void *taskBuffer,
                                          OS_Task task, void *taskParam,
                                          enum OS_TaskPriority priority);
 enum OS_Result  OS_TaskEnd              (void *taskBuffer, OS_TaskRet retVal);
+void *          OS_TaskSelf             ();
 enum OS_Result  OS_TaskYield            ();
 enum OS_Result  OS_TaskPeriodicDelay    (OS_Ticks ticks);
 enum OS_Result  OS_TaskDelayFrom        (OS_Ticks ticks, OS_Ticks from);

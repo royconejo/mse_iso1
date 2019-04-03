@@ -28,30 +28,23 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#define DWT_CYCCNT	0xE0001004
+#pragma once
 
-.syntax unified
-.thumb
-.text
-.extern OS_GetNextStackPointer
+#include <stdint.h>
+#include <stdbool.h>
 
-.global PendSV_Handler
-.thumb_func
-    PendSV_Handler:
-            tst  lr,   0x10
-            it   eq
-            vpusheq {s16-s31}
-            push {r4-r11,lr}
-            ldr  r1,   =DWT_CYCCNT
-            ldr  r1,   [r1]
-            mrs  r0,   msp                  @ msp = Main Stack Pointer
-            bl   OS_GetNextStackPointer
-            msr  msp,  r0
-            ldr  r0,   =0
-            ldr  r1,   =DWT_CYCCNT
-            str  r0,   [r1]
-            pop  {r4-r11,lr}
-            tst  lr,   0x10
-            it   eq
-            vpopeq {s16-s31}
-            bx   lr
+
+#define SEMAPHORE_MaxResources      ((uint32_t) -1)
+
+
+struct SEMAPHORE
+{
+    uint32_t            resources;
+    volatile uint32_t   acquired;
+};
+
+
+bool    SEMAPHORE_Init      (struct SEMAPHORE *s, uint32_t resources,
+                             uint32_t acquired);
+bool    SEMAPHORE_Acquire   (struct SEMAPHORE *s);
+bool    SEMAPHORE_Release   (struct SEMAPHORE *s);

@@ -28,30 +28,51 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#define DWT_CYCCNT	0xE0001004
+#include "os_semaphore.h"
 
-.syntax unified
-.thumb
-.text
-.extern OS_GetNextStackPointer
 
-.global PendSV_Handler
-.thumb_func
-    PendSV_Handler:
-            tst  lr,   0x10
-            it   eq
-            vpusheq {s16-s31}
-            push {r4-r11,lr}
-            ldr  r1,   =DWT_CYCCNT
-            ldr  r1,   [r1]
-            mrs  r0,   msp                  @ msp = Main Stack Pointer
-            bl   OS_GetNextStackPointer
-            msr  msp,  r0
-            ldr  r0,   =0
-            ldr  r1,   =DWT_CYCCNT
-            str  r0,   [r1]
-            pop  {r4-r11,lr}
-            tst  lr,   0x10
-            it   eq
-            vpopeq {s16-s31}
-            bx   lr
+typedef bool (*semaphoreOp) (struct SEMAPHORE *s);
+
+
+__attribute__((always_inline))
+static inline bool semaphoreOpRetry (semaphoreOp op, struct SEMAPHORE *s,
+                                     OS_Ticks timeout)
+{
+    const OS_Ticks Timeout = OS_GetTicks() + timeout;
+
+    while (OS_GetTicks() < Timeout)
+    {
+        if (!op (s))
+        {
+            OS_TaskYield ();
+        }
+        else
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+bool OS_SEMAPHORE_AcquireRetry (struct SEMAPHORE *s, OS_Ticks timeout)
+{
+    if (!s)
+    {
+        return false;
+    }
+
+    return semaphoreOpRetry (SEMAPHORE_Acquire, s, timeout);
+}
+
+
+bool OS_SEMAPHORE_ReleaseRetry (struct SEMAPHORE *s, OS_Ticks timeout)
+{
+    if (!s)
+    {
+        return false;
+    }
+
+    return semaphoreOpRetry (SEMAPHORE_Release, s, timeout);
+}

@@ -29,11 +29,12 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 #include "os.h"
+#include "os_critical.h"
 #include "debug.h"
 #include <string.h>
 #include "chip.h"   // CMSIS
 
-#ifndef RETROCIAA_OS_STANDALONE
+#ifndef RETROCIAA_OS_CUSTOM_SYSTICK
 #include "systick.h"
 #endif
 
@@ -41,18 +42,9 @@
 static struct OS *g_OS = NULL;
 
 
-static void schedulerWakeup ()
-{
-    __ISB ();
-    __DSB ();
-
-    SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
-}
-
-
 static void schedulerTick (OS_Ticks ticks)
 {
-    schedulerWakeup ();
+    OS_SchedulerWakeup ();
 }
 
 
@@ -67,59 +59,10 @@ static OS_TaskRet taskIdle (OS_TaskParam arg)
 }
 
 
-static void taskDetach (struct OS_TaskControl *taskControl)
-{
-    // Detaching task from the chain
-    if (taskControl->prev)
-    {
-        taskControl->prev->next = taskControl->next;
-    }
-
-    if (taskControl->next)
-    {
-        taskControl->next->prev = taskControl->prev;
-    }
-
-    taskControl->prev = NULL;
-    taskControl->next = NULL;
-}
-
-
-static void taskDetachEnds (struct OS_TaskControlEnds *ends,
-                            struct OS_TaskControl *taskControl)
-{
-    DEBUG_Assert ((ends->firstTask && ends->lastTask)
-                    || (!ends->firstTask && !ends->lastTask));
-
-    const bool TaskFirst = (ends->firstTask == taskControl);
-    const bool TaskLast  = (ends->lastTask  == taskControl);
-
-    // Removing the only task in the linked list
-    if (TaskFirst && TaskLast)
-    {
-        DEBUG_Assert (!taskControl->prev && !taskControl->next);
-        ends->firstTask = NULL;
-        ends->lastTask  = NULL;
-    }
-    // Removing the first task
-    else if (TaskFirst)
-    {
-        DEBUG_Assert (taskControl->next);
-        ends->firstTask = taskControl->next;
-    }
-    // Removing the last task
-    else if (TaskLast)
-    {
-        DEBUG_Assert (taskControl->prev);
-        ends->lastTask = taskControl->prev;
-    }
-
-    taskDetach (taskControl);
-}
-
-
 static void taskEnd (uint32_t retValue, struct OS_TaskControl *taskControl)
 {
+    OS_CriticalSection__ENTER ();
+
     // Task returned from its main function or by calling OS_TaskEnd(NULL)
     if (taskControl->state == OS_TaskState_Running)
     {
@@ -132,23 +75,24 @@ static void taskEnd (uint32_t retValue, struct OS_TaskControl *taskControl)
         DEBUG_Assert (g_OS->currentTask != taskControl);
         if (taskControl->state == OS_TaskState_Ready)
         {
-            taskDetachEnds (&g_OS->tasksReady[taskControl->priority],
-                            taskControl);
+            QUEUE_DetachNode (&g_OS->tasksReady[taskControl->priority],
+                                (struct QUEUE_Node *) taskControl);
         }
         else
         {
-            taskDetachEnds (&g_OS->tasksSuspended[taskControl->priority],
-                            taskControl);
+            QUEUE_DetachNode (&g_OS->tasksWaiting[taskControl->priority],
+                                (struct QUEUE_Node *) taskControl);
         }
     }
 
     taskControl->retValue           = retValue;
     taskControl->state              = OS_TaskState_Terminated;
-    taskControl->terminatedAtTicks  = OS_GetTicks ();
+    taskControl->terminatedAt  = OS_GetTicks ();
 
     if (!g_OS->currentTask)
     {
-        schedulerWakeup ();
+        OS_CriticalSection__CLEAR ();
+        OS_SchedulerWakeup ();
         // If closed from the same task (task auto-termination) the stack
         // pointer is no longer used and its context gets trapped in an infinite
         // loop.
@@ -157,6 +101,8 @@ static void taskEnd (uint32_t retValue, struct OS_TaskControl *taskControl)
             __WFI ();
         }
     }
+
+    OS_CriticalSection__LEAVE ();
 }
 
 
@@ -191,49 +137,18 @@ static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
 }
 
 
-static void taskPush (struct OS_TaskControl *lastTc,
-                      struct OS_TaskControl *newTc)
-{
-    if (!lastTc)
-    {
-        return;
-    }
-
-    lastTc->next = newTc;
-    newTc->prev  = lastTc;
-}
-
-
-static void taskPushEnds (struct OS_TaskControlEnds *ends,
-                          struct OS_TaskControl *tc)
-{
-    if (!ends->firstTask)
-    {
-        DEBUG_Assert (!ends->lastTask);
-        ends->firstTask = tc;
-    }
-    else
-    {
-        DEBUG_Assert (ends->lastTask);
-        taskPush (ends->lastTask, tc);
-    }
-
-    ends->lastTask = tc;
-}
-
-
 static void taskUpdateState (struct OS_TaskControl *tc, OS_Ticks now)
 {
-    if (tc->suspendedUntilTicks > now)
+    if (tc->suspendedUntil > now)
     {
-        tc->state = OS_TaskState_Suspended;
+        tc->state = OS_TaskState_Waiting;
         return;
     }
 
-    if (tc->suspendedUntilTicks && tc->suspendedUntilTicks <= now)
+    if (tc->suspendedUntil && tc->suspendedUntil <= now)
     {
-        tc->lastSuspensionTicks = tc->suspendedUntilTicks;
-        tc->suspendedUntilTicks = 0;
+        tc->lastSuspension = tc->suspendedUntil;
+        tc->suspendedUntil = 0;
     }
 
     tc->state = OS_TaskState_Ready;
@@ -244,29 +159,35 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 {
     DWT->CYCCNT = 0;
 
+    __CLREX ();
+
     DEBUG_Assert (g_OS);
+
+    OS_ResetSchedulingMisses ();
 
     const OS_Ticks Now = OS_GetTicks ();
 
-    // Suspended tasks update
-    for (enum OS_TaskPriority i = OS_TaskPriorityLevel0;
-         i < OS_TaskPriorityLevels; ++i)
+    // Waiting tasks update
+    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
-        struct OS_TaskControlEnds   *ends = &g_OS->tasksSuspended[i];
-        struct OS_TaskControl       *task = ends->firstTask;
+        struct QUEUE            *queue  = &g_OS->tasksWaiting[i];
+        struct OS_TaskControl   *task   = (struct OS_TaskControl *) queue->head;
 
         while (task)
         {
             DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
 
-            struct OS_TaskControl *next = task->next;
+            struct OS_TaskControl *next =
+                                    (struct OS_TaskControl *) task->node.next;
+
             taskUpdateState (task, Now);
 
             if (task->state == OS_TaskState_Ready)
             {
                 // Timeout reached, task is ready
-                taskDetachEnds  (ends, task);
-                taskPushEnds    (&g_OS->tasksReady[i], task);
+                QUEUE_DetachNode (queue, (struct QUEUE_Node *) task);
+                QUEUE_PushNode   (&g_OS->tasksReady[i],
+                                        (struct QUEUE_Node *) task);
             }
             task = next;
         }
@@ -289,12 +210,14 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 
                 switch (ct->state)
                 {
-                    case OS_TaskState_Suspended:
-                        taskPushEnds (&g_OS->tasksSuspended[ct->priority], ct);
+                    case OS_TaskState_Waiting:
+                        QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
+                                                (struct QUEUE_Node *) ct);
                         break;
 
                     case OS_TaskState_Ready:
-                        taskPushEnds (&g_OS->tasksReady[ct->priority], ct);
+                        QUEUE_PushNode (&g_OS->tasksReady[ct->priority],
+                                                (struct QUEUE_Node *) ct);
                         break;
 
                     default:
@@ -310,14 +233,13 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
         }
     }
 
-    for (enum OS_TaskPriority i = OS_TaskPriorityLevel0;
-         i < OS_TaskPriorityLevels; ++i)
+    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
-        struct OS_TaskControlEnds *ends = &g_OS->tasksReady[i];
-        if (ends->firstTask)
+        struct QUEUE *queue = &g_OS->tasksReady[i];
+        if (queue->head)
         {
-            g_OS->currentTask = ends->firstTask;
-            taskDetachEnds (ends, ends->firstTask);
+            g_OS->currentTask = (struct OS_TaskControl *) queue->head;
+            QUEUE_DetachNode (queue, queue->head);
             break;
         }
     }
@@ -328,15 +250,15 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
     // Last check for stack bounds integrity
     DEBUG_Assert (g_OS->currentTask->stackBarrier == OS_StackBarrierValue);
 
-    if (g_OS->startedAtTicks == OS_UndefinedTicks)
+    if (g_OS->startedAt == OS_UndefinedTicks)
     {
-        g_OS->startedAtTicks = OS_GetTicks ();
+        g_OS->startedAt = OS_GetTicks ();
     }
 
     g_OS->currentTask->state = OS_TaskState_Running;
 
     // Cycles used for scheduling.
-    g_OS->schedulerCycles += DWT->CYCCNT;
+    g_OS->schedulerRun += DWT->CYCCNT;
 
     return g_OS->currentTask->sp;
 }
@@ -357,7 +279,17 @@ enum OS_Result OS_Init (struct OS *o)
     // Enable MCU cycle counter
     DWT->CTRL |= 1 << DWT_CTRL_CYCCNTENA_Pos;
 
-    o->startedAtTicks = OS_UndefinedTicks;
+    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
+    {
+        QUEUE_Init (&o->tasksReady[i]);
+        QUEUE_Init (&o->tasksWaiting[i]);
+    }
+
+    o->startedAt = OS_UndefinedTicks;
+
+    OS_CriticalSection__RESET   ();
+    OS_ResetSchedulingMisses    ();
+
     g_OS = o;
 
     // Idle task with lowest priority level (one point below lower normal task
@@ -401,14 +333,19 @@ enum OS_Result OS_TaskStart (void *taskBuffer, uint32_t taskBufferSize,
     struct OS_TaskControl *taskControl = (struct OS_TaskControl *) taskBuffer;
 
     taskControl->size               = taskBufferSize;
-    taskControl->startedAtTicks     = OS_UndefinedTicks;
-    taskControl->terminatedAtTicks  = OS_UndefinedTicks;
+    taskControl->startedAt     = OS_UndefinedTicks;
+    taskControl->terminatedAt  = OS_UndefinedTicks;
     taskControl->priority           = priority;
     taskControl->state              = OS_TaskState_Ready;
     taskControl->stackBarrier       = OS_StackBarrierValue;
 
     taskStackInit   (taskControl, task, taskParam);
-    taskPushEnds    (&g_OS->tasksReady[taskControl->priority], taskControl);
+
+    OS_CriticalSection__ENTER ();
+
+    QUEUE_PushNode  (&g_OS->tasksReady[taskControl->priority],
+                                            (struct QUEUE_Node *) taskControl);
+    OS_CriticalSection__LEAVE ();
 
     DEBUG_Assert (taskControl->stackBarrier == OS_StackBarrierValue);
 
@@ -430,12 +367,28 @@ enum OS_Result OS_TaskEnd (void *taskBuffer, OS_TaskRet retVal)
         DEBUG_Assert (g_OS->currentTask
                         && g_OS->currentTask->state == OS_TaskState_Running);
 
+        OS_CriticalSection__ENTER ();
+
         taskControl = g_OS->currentTask;
+
+        OS_CriticalSection__LEAVE ();
     }
+
 
     taskEnd (retVal, taskControl);
 
     return OS_Result_OK;
+}
+
+
+void * OS_TaskSelf ()
+{
+    if (!g_OS)
+    {
+        return NULL;
+    }
+
+    return (void *) g_OS->currentTask;
 }
 
 
@@ -451,7 +404,7 @@ enum OS_Result OS_TaskYield ()
         return OS_Result_NoCurrentTask;
     }
 
-    schedulerWakeup ();
+    OS_SchedulerWakeup ();
     __WFI ();
 
     return OS_Result_OK;
@@ -470,8 +423,8 @@ enum OS_Result OS_TaskPeriodicDelay (OS_Ticks ticks)
         return OS_Result_NoCurrentTask;
     }
 
-    g_OS->currentTask->suspendedUntilTicks =
-                        g_OS->currentTask->lastSuspensionTicks + ticks;
+    g_OS->currentTask->suspendedUntil =
+                                g_OS->currentTask->lastSuspension + ticks;
 
     return OS_TaskYield ();
 }
@@ -489,7 +442,7 @@ enum OS_Result OS_TaskDelayFrom (OS_Ticks ticks, OS_Ticks from)
         return OS_Result_NoCurrentTask;
     }
 
-    g_OS->currentTask->suspendedUntilTicks = from + ticks;
+    g_OS->currentTask->suspendedUntil = from + ticks;
 
     return OS_TaskYield ();
 }
@@ -505,7 +458,7 @@ void OS_Start ()
 {
     DEBUG_Assert (g_OS);
 
-    g_OS->startedAtTicks = OS_GetTicks ();
+    g_OS->startedAt = OS_GetTicks ();
     OS_SetTickHook (schedulerTick);
 
     while (1)

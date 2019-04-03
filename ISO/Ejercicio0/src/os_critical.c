@@ -28,30 +28,68 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#define DWT_CYCCNT	0xE0001004
+#include "os_critical.h"
+#include "debug.h"
+#include "chip.h"       // CMSIS
+#include <stdint.h>
 
-.syntax unified
-.thumb
-.text
-.extern OS_GetNextStackPointer
 
-.global PendSV_Handler
-.thumb_func
-    PendSV_Handler:
-            tst  lr,   0x10
-            it   eq
-            vpusheq {s16-s31}
-            push {r4-r11,lr}
-            ldr  r1,   =DWT_CYCCNT
-            ldr  r1,   [r1]
-            mrs  r0,   msp                  @ msp = Main Stack Pointer
-            bl   OS_GetNextStackPointer
-            msr  msp,  r0
-            ldr  r0,   =0
-            ldr  r1,   =DWT_CYCCNT
-            str  r0,   [r1]
-            pop  {r4-r11,lr}
-            tst  lr,   0x10
-            it   eq
-            vpopeq {s16-s31}
-            bx   lr
+static volatile uint32_t g_OS_CriticalSection   = 0;
+static volatile uint32_t g_OS_SchedulingMisses  = 0;
+
+
+void OS_SchedulerWakeup ()
+{
+    if (!g_OS_CriticalSection)
+    {
+        SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+
+        __DSB ();
+        __ISB ();
+    }
+    else
+    {
+        ++ g_OS_SchedulingMisses;
+    }
+}
+
+
+void OS_ResetSchedulingMisses ()
+{
+    g_OS_SchedulingMisses = 0;
+}
+
+
+void OS_CriticalSection__ENTER ()
+{
+    DEBUG_Assert (!g_OS_CriticalSection);
+
+    g_OS_CriticalSection = 1;
+}
+
+
+void OS_CriticalSection__LEAVE ()
+{
+    DEBUG_Assert (g_OS_CriticalSection);
+
+    g_OS_CriticalSection = 0;
+
+    if (g_OS_SchedulingMisses)
+    {
+        OS_SchedulerWakeup ();
+    }
+}
+
+
+void OS_CriticalSection__CLEAR ()
+{
+    DEBUG_Assert (g_OS_CriticalSection);
+
+    g_OS_CriticalSection = 0;
+}
+
+
+void OS_CriticalSection__RESET ()
+{
+    g_OS_CriticalSection = 0;
+}

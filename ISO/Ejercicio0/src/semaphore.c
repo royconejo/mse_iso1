@@ -28,30 +28,71 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#define DWT_CYCCNT	0xE0001004
+#include "semaphore.h"
+#include "debug.h"
+#include "chip.h"       // CMSIS
+#include <string.h>
 
-.syntax unified
-.thumb
-.text
-.extern OS_GetNextStackPointer
 
-.global PendSV_Handler
-.thumb_func
-    PendSV_Handler:
-            tst  lr,   0x10
-            it   eq
-            vpusheq {s16-s31}
-            push {r4-r11,lr}
-            ldr  r1,   =DWT_CYCCNT
-            ldr  r1,   [r1]
-            mrs  r0,   msp                  @ msp = Main Stack Pointer
-            bl   OS_GetNextStackPointer
-            msr  msp,  r0
-            ldr  r0,   =0
-            ldr  r1,   =DWT_CYCCNT
-            str  r0,   [r1]
-            pop  {r4-r11,lr}
-            tst  lr,   0x10
-            it   eq
-            vpopeq {s16-s31}
-            bx   lr
+bool SEMAPHORE_Init (struct SEMAPHORE *s, uint32_t resources, uint32_t acquired)
+{
+    if (!s || !resources || acquired > resources)
+    {
+        return false;
+    }
+
+    memset (s, 0, sizeof(struct SEMAPHORE));
+
+    s->resources    = resources;
+    s->acquired     = acquired;
+
+    return true;
+}
+
+
+bool SEMAPHORE_Acquire (struct SEMAPHORE *s)
+{
+    if (!s)
+    {
+        return false;
+    }
+
+    uint32_t value = __LDREXW (&s->acquired);
+
+    if (!value)
+    {
+        return false;
+    }
+
+    -- value;
+
+    if (__STREXW (value, &s->acquired))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+
+bool SEMAPHORE_Release (struct SEMAPHORE *s)
+{
+    if (!s)
+    {
+        return false;
+    }
+
+    uint32_t value = __LDREXW (&s->acquired);
+
+    ++ value;
+
+    DEBUG_Assert (value <= s->resources);
+
+    if (__STREXW (value, &s->acquired))
+    {
+        return false;
+    }
+
+    return true;
+}
+
