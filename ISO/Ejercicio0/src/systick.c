@@ -1,6 +1,7 @@
 /*
-    RETRO-CIAA™ Library
-    Copyright 2018 Santiago Germino (royconejo@gmail.com)
+    Copyright 2019 Santiago Germino (royconejo@gmail.com)
+
+    RETRO-CIAA™ Library - SYSTICK functions and event handler.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:

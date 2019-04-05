@@ -1,6 +1,8 @@
 /*
-    RETRO-CIAA™ Library
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
+
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (RETRO-OS).
+                          Mutex object.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -28,30 +30,18 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#define DWT_CYCCNT	0xE0001004
+#pragma once
 
-.syntax unified
-.thumb
-.text
-.extern OS_GetNextStackPointer
+#include "semaphore.h"
 
-.global PendSV_Handler
-.thumb_func
-    PendSV_Handler:
-            tst  lr,   0x10
-            it   eq
-            vpusheq {s16-s31}
-            push {r4-r11,lr}
-            ldr  r1,   =DWT_CYCCNT
-            ldr  r1,   [r1]
-            mrs  r0,   msp                  @ msp = Main Stack Pointer
-            bl   OS_GetNextStackPointer
-            msr  msp,  r0
-            ldr  r0,   =0
-            ldr  r1,   =DWT_CYCCNT
-            str  r0,   [r1]
-            pop  {r4-r11,lr}
-            tst  lr,   0x10
-            it   eq
-            vpopeq {s16-s31}
-            bx   lr
+
+struct OS_MUTEX
+{
+    struct SEMAPHORE    sem;
+    void                *owner;
+};
+
+
+bool    OS_MUTEX_Init       (struct OS_MUTEX *m);
+bool    OS_MUTEX_Lock       (struct OS_MUTEX *m);
+bool    OS_MUTEX_Unlock     (struct OS_MUTEX *m);

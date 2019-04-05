@@ -1,6 +1,7 @@
 /*
-    RETRO-CIAA™ Library
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
+
+    RETRO-CIAA™ Library - Semaphore object and functions.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -84,9 +85,12 @@ bool SEMAPHORE_Release (struct SEMAPHORE *s)
 
     uint32_t value = __LDREXW (&s->acquired);
 
-    ++ value;
+    if (value + 1 > s->resources)
+    {
+        return false;
+    }
 
-    DEBUG_Assert (value <= s->resources);
+    ++ value;
 
     if (__STREXW (value, &s->acquired))
     {
@@ -96,3 +100,8 @@ bool SEMAPHORE_Release (struct SEMAPHORE *s)
     return true;
 }
 
+
+uint32_t SEMAPHORE_Available (struct SEMAPHORE *s)
+{
+    return (s->resources - s->acquired);
+}

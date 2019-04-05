@@ -1,6 +1,8 @@
 /*
-    RETRO-CIAA™ Library
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
+
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (RETRO-OS).
+                          User API.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -30,42 +32,33 @@
 */
 #pragma once
 
-#include "queue.h"
-#include "semaphore.h"
 #include <stdint.h>
 #include <stdbool.h>
 
+/*
+    RETRO-OS User API
+*/
 
-typedef uint32_t        OS_TaskRet;
-typedef void *          OS_TaskParam;
-typedef uint64_t        OS_Ticks;
-typedef uint64_t        OS_Cycles;
-typedef OS_TaskRet      (*OS_Task) (OS_TaskParam);
-typedef void            (*OS_TickHook) (OS_Ticks ticks);
+#define OS_TaskReturn(x)    return (x & ((uint32_t) - 1))
 
-
-#define OS_IntegerRegisters     17
-#define OS_FPointRegisters      (16 + 1 + 16)
-#define OS_ContextRegisters     (OS_FPointRegisters + OS_IntegerRegisters)
-// NOTE: this number must be big enough for any task to be able to execute the
-//       scheduler!
-#define OS_MinAppStackSize      128
-#define OS_TaskMinBufferSize    (sizeof(struct OS_TaskControl) \
-                                            + (OS_ContextRegisters * 4) \
-                                            + OS_MinAppStackSize)
-#define OS_UndefinedTicks       ((OS_Ticks) -1)
-#define OS_StackBarrierValue    0xDEADBEEF
+typedef uint64_t            OS_TaskRet;
+typedef void *              OS_TaskParam;
+typedef uint64_t            OS_Ticks;
+typedef OS_TaskRet          (*OS_Task) (OS_TaskParam);
+typedef void                (*OS_TickHook) (OS_Ticks ticks);
 
 
 enum OS_Result
 {
     OS_Result_OK = 0,
+    OS_Result_Timeout,
     OS_Result_AlreadyInitialized,
     OS_Result_NotInitialized,
+    OS_Result_NoCurrentTask,
     OS_Result_InvalidParams,
     OS_Result_InvalidBufferAlignment,
     OS_Result_InvalidBufferSize,
-    OS_Result_NoCurrentTask
+    OS_Result_InvalidState
 };
 
 
@@ -88,59 +81,38 @@ enum OS_TaskPriority
 };
 
 
-enum OS_TaskState
+enum OS_TaskSignalType
 {
-    OS_TaskState_Terminated,
-    OS_TaskState_Waiting,
-    OS_TaskState_Ready,
-    OS_TaskState_Running
+    OS_TaskSignalType_SemaphoreAcquire,
+    OS_TaskSignalType_SemaphoreRelease,
+    OS_TaskSignalType_MutexLock,
+    OS_TaskSignalType_MutexUnlock,
+    OS_TaskSignalType__COUNT
 };
 
 
-struct OS_TaskControl
-{
-    struct QUEUE_Node       node;
-    uint32_t                size;
-    uint32_t                retValue;
-    OS_Ticks                startedAt;
-    OS_Ticks                terminatedAt;
-    OS_Ticks                suspendedUntil;
-    OS_Ticks                lastSuspension;
-    struct SEMAPHORE        *signalWaiting;
-    OS_Cycles               cycles;
-    enum OS_TaskPriority    priority;
-    enum OS_TaskState       state;
-    uint32_t                sp;
-    uint32_t                stackBarrier;
-};
+OS_Ticks        OS_GetTicks             ();
+void            OS_SetTickHook          (OS_TickHook schedulerTickHook);
 
+uint32_t        OS_InitBufferSize       ();
+uint32_t        OS_MinTaskBufferSize    ();
 
-struct OS
-{
-   OS_Ticks                 startedAt;
-   OS_Cycles                schedulerRun;
-   // The only one task in the RUNNING state
-   struct OS_TaskControl    *currentTask;
-   // Tasks in READY state
-   struct QUEUE             tasksReady[OS_TaskPriorityLevels];
-   // Tasks in any other state
-   struct QUEUE             tasksWaiting[OS_TaskPriorityLevels];
-   // Idle task buffer (this task is internal and belongs to the OS)
-   uint8_t                  idleTaskBuffer[OS_TaskMinBufferSize];
-};
+enum OS_Result  OS_Init                 (void *buffer);
+void            OS_Forever              () __attribute__((noreturn));
+void            OS_Start                ();
+bool            OS_Terminate            ();
 
-
-enum OS_Result  OS_Init                 (struct OS *o);
 enum OS_Result  OS_TaskStart            (void *taskBuffer,
                                          uint32_t taskBufferSize,
                                          OS_Task task, void *taskParam,
-                                         enum OS_TaskPriority priority);
-enum OS_Result  OS_TaskEnd              (void *taskBuffer, OS_TaskRet retVal);
+                                         enum OS_TaskPriority priority,
+                                         const char *description);
+enum OS_Result  OS_TaskTerminate        (void *taskBuffer, OS_TaskRet retVal);
 void *          OS_TaskSelf             ();
 enum OS_Result  OS_TaskYield            ();
 enum OS_Result  OS_TaskPeriodicDelay    (OS_Ticks ticks);
 enum OS_Result  OS_TaskDelayFrom        (OS_Ticks ticks, OS_Ticks from);
 enum OS_Result  OS_TaskDelay            (OS_Ticks ticks);
-void            OS_Start                () __attribute__((noreturn));
-OS_Ticks        OS_GetTicks             ();
-void            OS_SetTickHook          (OS_TickHook schedulerTickHook);
+enum OS_Result  OS_TaskWaitForSignal    (enum OS_TaskSignalType sigType,
+                                         void *sigObject, OS_Ticks timeout);
+enum OS_Result  OS_TaskReturnValue      (void *taskBuffer, uint32_t *retValue);
