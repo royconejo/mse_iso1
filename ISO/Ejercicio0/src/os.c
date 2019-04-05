@@ -55,7 +55,7 @@
                                             + (OS_ContextRegisters * 4) \
                                             + OS_MinAppStackSize)
 #define OS_UndefinedTicks           ((OS_Ticks) -1)
-#define OS_PerfTargetTicks        1000
+#define OS_PerfTargetTicks          1000
 
 
 typedef uint64_t    OS_Cycles;
@@ -133,12 +133,12 @@ struct OS
 
 static OS_TaskRet taskIdle (OS_TaskParam arg)
 {
-	while (1)
+    while (1)
     {
         __WFI ();
     }
 
-    return 0;
+    OS_TaskReturn (0);
 }
 
 
@@ -244,15 +244,15 @@ static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
     uint32_t *stackTop = &((uint32_t *)taskControl) [(taskControl->size >> 2)];
 
     *(--stackTop) = 1 << 24;                  // xPSR.T = 1
-	*(--stackTop) = (uint32_t) task;          // xPC
-	*(--stackTop) = (uint32_t) taskTerminate; // xLR
+    *(--stackTop) = (uint32_t) task;          // xPC
+    *(--stackTop) = (uint32_t) taskTerminate; // xLR
     *(--stackTop) = 0;                        // R12
     *(--stackTop) = 0;                        // R3
     *(--stackTop) = 0;                        // R2
     *(--stackTop) = 0;                        // R1
-	*(--stackTop) = (uint32_t) taskParam;     // R0
+    *(--stackTop) = (uint32_t) taskParam;     // R0
     // LR stacked at interrupt handler
-	*(--stackTop) = 0xFFFFFFF9;               // LR IRQ
+    *(--stackTop) = 0xFFFFFFF9;               // LR IRQ
     // R4-R11 stacked at interrupt handler
     *(--stackTop) = 0;                        // R11
     *(--stackTop) = 0;                        // R10
@@ -263,7 +263,7 @@ static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
     *(--stackTop) = 0;                        // R5
     *(--stackTop) = 0;                        // R4
 
-  	taskControl->sp = (uint32_t) stackTop;
+    taskControl->sp = (uint32_t) stackTop;
 }
 
 
@@ -437,7 +437,7 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
         g_OS->startedAt = Now;
     }
 
-    // Updating task in waiting state.
+    // Updating tasks in waiting state.
     for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
         struct QUEUE            *queue  = &g_OS->tasksWaiting[i];
@@ -470,8 +470,8 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
         }
     }
 
-    // This is done on every new performance measurement peoriod to update
-    // the metrics of all ready tasks.
+    // This is done at the first iteration of a new performance measurement
+    // period to update performance metrics for all ready tasks.
     if (g_OS->perfNewMeasureBegins)
     {
         for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
@@ -487,7 +487,7 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
         }
     }
 
-    // Updating the last executed task, if there is one.
+    // Update the last executed task, if there is one.
     {
         struct OS_TaskControl *ct = g_OS->currentTask;
         if (ct)
@@ -541,7 +541,7 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 
     DEBUG_Assert (!g_OS->currentTask);
 
-    // Find the next task according to priority and round-robin order.
+    // Find the next task according to priority in a round-robin scheme.
     for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
         struct QUEUE *queue = &g_OS->tasksReady[i];
@@ -645,7 +645,7 @@ enum OS_Result OS_Init (void *buffer)
 
     g_OS = os;
 
-    // Idle task with lowest priority level (one point below lower normal task
+    // Idle task with lowest priority level (one point below lowest normal task
     // priority).
     OS_TaskStart (os->idleTaskBuffer, sizeof(os->idleTaskBuffer),
                   taskIdle, NULL,
