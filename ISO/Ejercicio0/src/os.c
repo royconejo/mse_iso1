@@ -124,7 +124,7 @@ struct OS
    struct OS_TaskControl    *currentTask;
    // Tasks in READY state
    struct QUEUE             tasksReady      [OS_TaskPriorityLevels];
-   // Tasks in any other state
+   // Tasks in WAITING state
    struct QUEUE             tasksWaiting    [OS_TaskPriorityLevels];
    // Idle task buffer (this task is internal and belongs to the OS)
    uint8_t                  idleTaskBuffer  [OS_TaskMinBufferSize];
@@ -170,8 +170,6 @@ static void terminateOs ()
 static void taskYield ()
 {
     OS_SchedulerWakeup ();
-    // TODO: ver si este wfi es necesario
-    __WFI ();
 }
 
 
@@ -210,9 +208,14 @@ static void taskTerminate (uint32_t retValue,
                                             (struct QUEUE_Node *) taskControl);
             break;
 
-        default:
+        case OS_TaskState_Waiting:
             QUEUE_DetachNode (&g_OS->tasksWaiting[taskControl->priority],
                                             (struct QUEUE_Node *) taskControl);
+            break;
+
+        default:
+            // Invalid state
+            DEBUG_Assert (false);
             break;
     }
 
@@ -431,8 +434,11 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 
     perfCheckMeasuredPeriod ();
 
+    // First scheduler run
     if (g_OS->startedAt == OS_UndefinedTicks)
     {
+        DEBUG_Assert (!g_OS->currentTask);
+
         g_OS->mainSp    = currentSp;
         g_OS->startedAt = Now;
     }
@@ -510,14 +516,14 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 
             switch (ct->state)
             {
-                case OS_TaskState_Waiting:
-                    QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
-                                            (struct QUEUE_Node *) ct);
-                    break;
-
                 case OS_TaskState_Ready:
                     QUEUE_PushNode (&g_OS->tasksReady[ct->priority],
-                                            (struct QUEUE_Node *) ct);
+                                                (struct QUEUE_Node *) ct);
+                    break;
+
+                case OS_TaskState_Waiting:
+                    QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
+                                                (struct QUEUE_Node *) ct);
                     break;
 
                 default:
@@ -569,7 +575,7 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 
     ++ g_OS->perfTargetTicksCount;
 
-    // Aprox. number of cycles used for scheduling tasks.
+    // Aprox. number of cycles used for task scheduling.
     g_OS->schedulerRunCycles += DWT->CYCCNT;
 
     OS_CriticalSection__CLEAR ();
@@ -671,7 +677,7 @@ void OS_Start ()
     startOs (false);
 
     // First call to pendsv will do a context switch to the first available task
-    // defined in the OS (taskIdle if the user had not registered any task).
+    // defined in the OS (taskIdle if the user has not registered any task).
     __WFI ();
 
     // A context switch entering this point means the OS has been instructed to
