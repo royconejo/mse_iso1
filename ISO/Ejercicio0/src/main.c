@@ -58,9 +58,9 @@ int main ()
     OS_Init (initBuffer);
 
     OS_TaskStart (task1Buffer, sizeof(task1Buffer), task1, NULL,
-                  OS_TaskPriorityLevel1, "T1");
+                  OS_TaskPriorityLevel3_App, "T1");
     OS_TaskStart (task2Buffer, sizeof(task2Buffer), task2, NULL,
-                  OS_TaskPriorityLevel1, "T2");
+                  OS_TaskPriorityLevel3_App, "T2");
 
     OS_Start ();
 

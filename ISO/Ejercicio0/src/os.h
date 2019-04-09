@@ -64,20 +64,19 @@ enum OS_Result
 
 enum OS_TaskPriority
 {
-    OS_TaskPriorityLevel0   = 0,
-    OS_TaskPriorityLevel1,
-    OS_TaskPriorityLevel2,
-    OS_TaskPriorityLevel3,
-    OS_TaskPriorityLevel4,
-    OS_TaskPriorityLevel5,
-    OS_TaskPriorityLevel6,
-    OS_TaskPriorityLevel7,
+    OS_TaskPriorityLevel0_Kernel    = 0,
+    OS_TaskPriorityLevel1_Kernel,
+    OS_TaskPriorityLevel2_Kernel,
+    OS_TaskPriorityLevel3_App,
+    OS_TaskPriorityLevel4_App,
+    OS_TaskPriorityLevel5_App,
+    OS_TaskPriorityLevel6_App,
+    OS_TaskPriorityLevel7_Idle,
     OS_TaskPriorityLevels,
-    OS_TaskPriorityHighest  = OS_TaskPriorityLevel0,
-    OS_TaskPriorityLowest   = OS_TaskPriorityLevel6,
-    OS_TaskPriorityIdle     = OS_TaskPriorityLevel7,
-    OS_TaskPriority__BEGIN  = OS_TaskPriorityLevel0,
-    OS_TaskPriority__COUNT  = OS_TaskPriorityLevels
+    OS_TaskPriorityHighest          = OS_TaskPriorityLevel0_Kernel,
+    OS_TaskPriorityLowest           = OS_TaskPriorityLevel7_Idle,
+    OS_TaskPriority__BEGIN          = OS_TaskPriorityLevel0_Kernel,
+    OS_TaskPriority__COUNT          = OS_TaskPriorityLevels
 };
 
 

@@ -651,11 +651,11 @@ enum OS_Result OS_Init (void *buffer)
 
     g_OS = os;
 
-    // Idle task with lowest priority level (one point below lowest normal task
+    // Idle task with lowest priority level (one point below lowest normal app
     // priority).
     OS_TaskStart (os->idleTaskBuffer, sizeof(os->idleTaskBuffer),
                   taskIdle, NULL,
-                  OS_TaskPriorityIdle, TaskIdleDescription);
+                  OS_TaskPriorityLevel7_Idle, TaskIdleDescription);
 
     return OS_Result_OK;
 }

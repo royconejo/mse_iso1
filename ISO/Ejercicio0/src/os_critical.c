@@ -45,11 +45,10 @@ void OS_SchedulerWakeup ()
     if (!g_OS_CriticalSection)
     {
         SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
-        // TODO: ver si este wfi es necesario (__WFE?)
-        __WFI ();
-
         __DSB ();
         __ISB ();
+
+        // TODO: chequera que aca efectivamente ya se haya llamado a interrupcion!
     }
     else
     {
