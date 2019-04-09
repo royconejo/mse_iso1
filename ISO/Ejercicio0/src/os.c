@@ -246,6 +246,8 @@ static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
 {
     uint32_t *stackTop = &((uint32_t *)taskControl) [(taskControl->size >> 2)];
 
+    // Registers automatically stacked when entering the handler
+    // Values in this stack substitutes those.
     *(--stackTop) = 1 << 24;                  // xPSR.T = 1
     *(--stackTop) = (uint32_t) task;          // xPC
     *(--stackTop) = (uint32_t) taskTerminate; // xLR
@@ -254,9 +256,9 @@ static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
     *(--stackTop) = 0;                        // R2
     *(--stackTop) = 0;                        // R1
     *(--stackTop) = (uint32_t) taskParam;     // R0
-    // LR stacked at interrupt handler
+    // LR pushed at interrupt handler, modified to return tu threaded MSP
     *(--stackTop) = 0xFFFFFFF9;               // LR IRQ
-    // R4-R11 stacked at interrupt handler
+    // R4-R11 pushed at interrupt handler
     *(--stackTop) = 0;                        // R11
     *(--stackTop) = 0;                        // R10
     *(--stackTop) = 0;                        // R9

@@ -40,6 +40,7 @@
 .global PendSV_Handler
 .thumb_func
     PendSV_Handler:
+            cbz psp,   .nextPSP
             tst  lr,   0x10
             it   eq
             vpusheq {s16-s31}
