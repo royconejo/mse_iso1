@@ -66,6 +66,8 @@ static struct OS    *g_OS                   = NULL;
 static const char   *TaskNoDescription      = "N/A";
 static const char   *TaskIdleDescription    = "IDLE";
 
+extern void OS_SetAppStackPointer (uint32_t address);
+
 
 enum OS_TaskState
 {
@@ -110,7 +112,6 @@ struct OS_TaskControl
 
 struct OS
 {
-    uint32_t                mainSp;
     OS_Ticks                startedAt;
     OS_Ticks                terminatedAt;
     bool                    startedForever;
@@ -123,9 +124,9 @@ struct OS
    // The only one task in the RUNNING state
    struct OS_TaskControl    *currentTask;
    // Tasks in READY state
-   struct QUEUE             tasksReady      [OS_TaskPriorityLevels];
+   struct QUEUE             tasksReady      [OS_TaskPriority__COUNT];
    // Tasks in WAITING state
-   struct QUEUE             tasksWaiting    [OS_TaskPriorityLevels];
+   struct QUEUE             tasksWaiting    [OS_TaskPriority__COUNT];
    // Idle task buffer (this task is internal and belongs to the OS)
    uint8_t                  idleTaskBuffer  [OS_TaskMinBufferSize];
 };
@@ -174,13 +175,13 @@ static void taskYield ()
 
 
 // when a task returns from its main function it is assumed that taskControl
-// is NULL (R1 == 0).
+// is NULL (R1 == 0). This is achieved by returning an unit64_t from the tasks.
 static void taskTerminate (uint32_t retValue,
                            struct OS_TaskControl *taskControl)
 {
     OS_CriticalSection__ENTER ();
 
-    // Tasks can be abruptly terminated calling OS_TaskTerminate(TaskBuffer)
+    // Tasks can be abruptly terminated by calling OS_TaskTerminate(TaskBuffer)
     // from another task.
 
     // Own task returning from its main function or by calling
@@ -230,7 +231,7 @@ static void taskTerminate (uint32_t retValue,
         OS_SchedulerWakeup ();
         // If closed from the same task (task auto-termination) the stack
         // pointer is no longer used. Context gets trapped in an infinite loop
-        // for debug purposes only.
+        // (for debug purposes only).
         while (1)
         {
             __WFI ();
@@ -256,9 +257,10 @@ static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
     *(--stackTop) = 0;                        // R2
     *(--stackTop) = 0;                        // R1
     *(--stackTop) = (uint32_t) taskParam;     // R0
-    // LR pushed at interrupt handler, modified to return tu threaded MSP
-    *(--stackTop) = 0xFFFFFFF9;               // LR IRQ
-    // R4-R11 pushed at interrupt handler
+    // LR pushed at interrupt handler. Here artificially set to return to
+    // threaded PSP with FPU registers still unused.
+    *(--stackTop) = 0xFFFFFFFD;               // LR IRQ
+    // R4-R11 pushed at interrupt handler.
     *(--stackTop) = 0;                        // R11
     *(--stackTop) = 0;                        // R10
     *(--stackTop) = 0;                        // R9
@@ -415,6 +417,106 @@ inline static void perfUpdateMeasures (struct OS_PerfData *pd,
 }
 
 
+inline static void schedulerLastTaskUpdate (uint32_t currentSp,
+                                            uint32_t taskCycles,
+                                            uint32_t now)
+{
+    struct OS_TaskControl *ct = g_OS->currentTask;
+    if (!ct)
+    {
+        // if g_OS->currentTask == NULL, it is assumed that currentSp
+        // belongs to the first context or an already terminated task and
+        // therefore there is no corresponding task control register to
+        // store it.
+        return;
+    }
+
+    DEBUG_Assert (ct->state         == OS_TaskState_Running);
+    DEBUG_Assert (ct->stackBarrier  == OS_StackBarrierValue);
+
+    // Task switching from a previous running task
+    ct->runCycles  += taskCycles;
+    ct->sp          = currentSp;
+
+    perfUpdateMeasures (&ct->performance, taskCycles);
+
+    if (g_OS->perfNewMeasureBegins)
+    {
+        perfCloseLastMeasuredPeriod (&ct->performance);
+    }
+
+    taskUpdateState (ct, now);
+
+    switch (ct->state)
+    {
+        case OS_TaskState_Ready:
+            QUEUE_PushNode (&g_OS->tasksReady[ct->priority],
+                                            (struct QUEUE_Node *) ct);
+            break;
+
+        case OS_TaskState_Waiting:
+            QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
+                                            (struct QUEUE_Node *) ct);
+            break;
+
+        default:
+            // Invalid current task state for g_OS->currentTask.
+            DEBUG_Assert (false);
+            break;
+    }
+
+    DEBUG_Assert (ct->stackBarrier == OS_StackBarrierValue);
+
+    g_OS->currentTask = NULL;
+}
+
+
+inline static void schedulerSetCurrentTaskToRun (uint32_t now)
+{
+    // At least the idle task must have been selected.
+    DEBUG_Assert (g_OS->currentTask);
+
+    // Last check for stack bounds integrity
+    DEBUG_Assert (g_OS->currentTask->stackBarrier == OS_StackBarrierValue);
+
+    g_OS->currentTask->state = OS_TaskState_Running;
+
+    // First time running?
+    if (g_OS->currentTask->startedAt == OS_UndefinedTicks)
+    {
+        g_OS->currentTask->startedAt = now;
+    }
+
+    switch (g_OS->currentTask->priority)
+    {
+        case OS_TaskPriority_Drv0:
+        case OS_TaskPriority_Drv1:
+        case OS_TaskPriority_Drv2:
+            // CONTROL[0] = 0, Privileged in thread mode
+            __set_CONTROL ((__get_CONTROL() & ~0b1));
+            break;
+
+        default:
+            // CONTROL[0] = 1, User state in thread mode
+            __set_CONTROL ((__get_CONTROL() | 0b1));
+            break;
+    }
+}
+
+
+enum OS_Result OS_SystemCallHandler (uint32_t x, uint32_t y, uint32_t z)
+{
+
+
+
+
+
+
+
+    return 0xFFFFFFFF;
+}
+
+
 uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 {
     DWT->CYCCNT = 0;
@@ -425,7 +527,7 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
 
     if (g_OS->terminatedAt != OS_UndefinedTicks)
     {
-        return g_OS->mainSp;
+        return 0;
     }
 
     const OS_Ticks Now = OS_GetTicks ();
@@ -437,11 +539,11 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
     perfCheckMeasuredPeriod ();
 
     // First scheduler run
-    if (g_OS->startedAt == OS_UndefinedTicks)
+    if (!currentSp)
     {
+        DEBUG_Assert (g_OS->startedAt == OS_UndefinedTicks);
         DEBUG_Assert (!g_OS->currentTask);
 
-        g_OS->mainSp    = currentSp;
         g_OS->startedAt = Now;
     }
 
@@ -496,57 +598,9 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
     }
 
     // Update the last executed task, if there is one.
-    {
-        struct OS_TaskControl *ct = g_OS->currentTask;
-        if (ct)
-        {
-            DEBUG_Assert (ct->state         == OS_TaskState_Running);
-            DEBUG_Assert (ct->stackBarrier  == OS_StackBarrierValue);
+    schedulerLastTaskUpdate (currentSp, taskCycles, Now);
 
-            // Task switching from a previous running task
-            ct->runCycles  += taskCycles;
-            ct->sp          = currentSp;
-
-            perfUpdateMeasures (&ct->performance, taskCycles);
-
-            if (g_OS->perfNewMeasureBegins)
-            {
-                perfCloseLastMeasuredPeriod (&ct->performance);
-            }
-
-            taskUpdateState (ct, Now);
-
-            switch (ct->state)
-            {
-                case OS_TaskState_Ready:
-                    QUEUE_PushNode (&g_OS->tasksReady[ct->priority],
-                                                (struct QUEUE_Node *) ct);
-                    break;
-
-                case OS_TaskState_Waiting:
-                    QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
-                                                (struct QUEUE_Node *) ct);
-                    break;
-
-                default:
-                    // Invalid current task state for g_OS->currentTask.
-                    DEBUG_Assert (false);
-                    break;
-            }
-
-            DEBUG_Assert (ct->stackBarrier == OS_StackBarrierValue);
-
-            g_OS->currentTask = NULL;
-        }
-        else
-        {
-            // if g_OS->currentTask == NULL, it is assumed that currentSp
-            // belongs to the first context or an already terminated task and
-            // therefore there is no corresponding task control register to
-            // store it.
-        }
-    }
-
+    // There must be no task selected at this point
     DEBUG_Assert (!g_OS->currentTask);
 
     // Find the next task according to priority in a round-robin scheme.
@@ -561,19 +615,8 @@ uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
         }
     }
 
-    // At least the idle task must have been selected.
-    DEBUG_Assert (g_OS->currentTask);
-
-    // Last check for stack bounds integrity
-    DEBUG_Assert (g_OS->currentTask->stackBarrier == OS_StackBarrierValue);
-
-    g_OS->currentTask->state = OS_TaskState_Running;
-
-    // First time running?
-    if (g_OS->currentTask->startedAt == OS_UndefinedTicks)
-    {
-        g_OS->currentTask->startedAt = Now;
-    }
+    // Set the selected task to be ready to run
+    schedulerSetCurrentTaskToRun (Now);
 
     ++ g_OS->perfTargetTicksCount;
 
@@ -631,8 +674,14 @@ enum OS_Result OS_Init (void *buffer)
     // PendSV with minimum priority
     NVIC_SetPriority (PendSV_IRQn, (1 << __NVIC_PRIO_BITS) - 1);
 
+    // SVC with minimum - 1 priority
+    NVIC_SetPriority (SVCall_IRQn, (1 << __NVIC_PRIO_BITS) - 2);
+
+    // Highest priority for Systick
+    NVIC_SetPriority (SysTick_IRQn, 0);
+
     // Enable MCU cycle counter
-    DWT->CTRL |= 1 << DWT_CTRL_CYCCNTENA_Pos;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
     for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
@@ -657,7 +706,10 @@ enum OS_Result OS_Init (void *buffer)
     // priority).
     OS_TaskStart (os->idleTaskBuffer, sizeof(os->idleTaskBuffer),
                   taskIdle, NULL,
-                  OS_TaskPriorityLevel7_Idle, TaskIdleDescription);
+                  OS_TaskPriority_Idle, TaskIdleDescription);
+
+    // PSP == 0 signals the first switch from msp to psp since initialization.
+    __set_PSP (0);
 
     return OS_Result_OK;
 }
@@ -733,7 +785,7 @@ enum OS_Result OS_TaskStart (void *taskBuffer, uint32_t taskBufferSize,
         return OS_Result_NotInitialized;
     }
 
-    if (!task || priority >= OS_TaskPriorityLevels)
+    if (!task || priority >= OS_TaskPriority__COUNT)
     {
         return OS_Result_InvalidParams;
     }

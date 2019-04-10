@@ -41,6 +41,8 @@ OS_TaskRet task2 (OS_TaskParam arg)
         OS_TaskPeriodicDelay (1000);
 	}
 
+    enum OS_Result r = OS_SystemCall (0xAAAA, 0xBBBB, 0xCCCC);
+
 	OS_TaskReturn (0xFFFFFFFF);
 }
 
@@ -58,9 +60,9 @@ int main ()
     OS_Init (initBuffer);
 
     OS_TaskStart (task1Buffer, sizeof(task1Buffer), task1, NULL,
-                  OS_TaskPriorityLevel3_App, "T1");
+                  OS_TaskPriority_App1, "T1");
     OS_TaskStart (task2Buffer, sizeof(task2Buffer), task2, NULL,
-                  OS_TaskPriorityLevel3_App, "T2");
+                  OS_TaskPriority_App1, "T2");
 
     OS_Start ();
 

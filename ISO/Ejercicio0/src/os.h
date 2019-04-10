@@ -39,56 +39,65 @@
     RETRO-OS User API
 */
 
-#define OS_TaskReturn(x)    return (x & ((uint32_t) - 1))
+#define OS_TaskReturn(x)        return (x & ((uint32_t) - 1))
 
-typedef uint64_t            OS_TaskRet;
-typedef void *              OS_TaskParam;
-typedef uint64_t            OS_Ticks;
-typedef OS_TaskRet          (*OS_Task) (OS_TaskParam);
-typedef void                (*OS_TickHook) (OS_Ticks ticks);
+typedef uint64_t                OS_TaskRet;
+typedef void *                  OS_TaskParam;
+typedef uint64_t                OS_Ticks;
+typedef OS_TaskRet              (*OS_Task) (OS_TaskParam);
+typedef void                    (*OS_TickHook) (OS_Ticks ticks);
+
+#define ENUM_FORCE_UINT32(s)    s ## __FORCE32 = ((uint32_t) - 1)
 
 
 enum OS_Result
 {
-    OS_Result_OK = 0,
+    ENUM_FORCE_UINT32 (OS_Result),
+    OS_Result_OK            = 0,
+    OS_Result_InvalidCall   = 1,
+    OS_Result_InvalidParams,
+    OS_Result_InvalidBufferAlignment,
+    OS_Result_InvalidBufferSize,
+    OS_Result_InvalidState,
     OS_Result_Timeout,
     OS_Result_AlreadyInitialized,
     OS_Result_NotInitialized,
     OS_Result_NoCurrentTask,
-    OS_Result_InvalidParams,
-    OS_Result_InvalidBufferAlignment,
-    OS_Result_InvalidBufferSize,
-    OS_Result_InvalidState
 };
 
 
 enum OS_TaskPriority
 {
-    OS_TaskPriorityLevel0_Kernel    = 0,
-    OS_TaskPriorityLevel1_Kernel,
-    OS_TaskPriorityLevel2_Kernel,
-    OS_TaskPriorityLevel3_App,
-    OS_TaskPriorityLevel4_App,
-    OS_TaskPriorityLevel5_App,
-    OS_TaskPriorityLevel6_App,
-    OS_TaskPriorityLevel7_Idle,
-    OS_TaskPriorityLevels,
-    OS_TaskPriorityHighest          = OS_TaskPriorityLevel0_Kernel,
-    OS_TaskPriorityLowest           = OS_TaskPriorityLevel7_Idle,
-    OS_TaskPriority__BEGIN          = OS_TaskPriorityLevel0_Kernel,
-    OS_TaskPriority__COUNT          = OS_TaskPriorityLevels
+    ENUM_FORCE_UINT32 (OS_TaskPriority),
+    OS_TaskPriority__BEGIN      = 0,
+    OS_TaskPriority_DrvHighest  = OS_TaskPriority__BEGIN,
+    OS_TaskPriority_Drv0        = OS_TaskPriority_DrvHighest,
+    OS_TaskPriority_Drv1,
+    OS_TaskPriority_Drv2,
+    OS_TaskPriority_DrvLowest   = OS_TaskPriority_Drv2,
+    OS_TaskPriority_AppHighest,
+    OS_TaskPriority_App0        = OS_TaskPriority_AppHighest,
+    OS_TaskPriority_App1,
+    OS_TaskPriority_App2,
+    OS_TaskPriority_App3,
+    OS_TaskPriority_AppLowest   = OS_TaskPriority_App3,
+    OS_TaskPriority_Idle,
+    OS_TaskPriority__COUNT
 };
 
 
 enum OS_TaskSignalType
 {
-    OS_TaskSignalType_SemaphoreAcquire,
+    ENUM_FORCE_UINT32 (OS_TaskSignalType),
+    OS_TaskSignalType_SemaphoreAcquire = 0,
     OS_TaskSignalType_SemaphoreRelease,
     OS_TaskSignalType_MutexLock,
     OS_TaskSignalType_MutexUnlock,
     OS_TaskSignalType__COUNT
 };
 
+
+enum OS_Result  OS_SystemCall           (uint32_t x, uint32_t y, uint32_t z);
 
 OS_Ticks        OS_GetTicks             ();
 void            OS_SetTickHook          (OS_TickHook schedulerTickHook);
