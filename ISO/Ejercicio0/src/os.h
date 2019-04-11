@@ -1,7 +1,7 @@
 /*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
-    RETRO-CIAA™ Library - Preemtive multitasking Operating System (RETRO-OS).
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
                           User API.
 
     Redistribution and use in source and binary forms, with or without
@@ -97,7 +97,16 @@ enum OS_TaskSignalType
 };
 
 
-enum OS_Result  OS_SystemCall           (uint32_t x, uint32_t y, uint32_t z);
+enum OS_SystemCall
+{
+    ENUM_FORCE_UINT32 (OS_SystemCall),
+    OS_SystemCall_SchedulerWakeup   = 0,
+    OS_SystemCall_Yield             = OS_SystemCall_SchedulerWakeup,
+
+};
+
+
+enum OS_Result  OS_SystemCall           (enum OS_SystemCall call, void *params);
 
 OS_Ticks        OS_GetTicks             ();
 void            OS_SetTickHook          (OS_TickHook schedulerTickHook);

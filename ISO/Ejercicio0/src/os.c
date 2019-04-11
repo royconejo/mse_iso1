@@ -1,7 +1,7 @@
 /*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
-    RETRO-CIAA™ Library - Preemtive multitasking Operating System (RETRO-OS).
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
                           User API and scheduler implementation.
 
     Redistribution and use in source and binary forms, with or without
@@ -504,10 +504,15 @@ inline static void schedulerSetCurrentTaskToRun (uint32_t now)
 }
 
 
-enum OS_Result OS_SystemCallHandler (uint32_t x, uint32_t y, uint32_t z)
+enum OS_Result OS_SystemCallHandler (enum OS_SystemCall call, void *params)
 {
 
+    switch (call)
+    {
+        case OS_SystemCall_Yield:
 
+
+    }
 
 
 

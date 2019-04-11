@@ -1,7 +1,7 @@
 /*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
-    RETRO-CIAA™ Library - Preemtive multitasking Operating System (RETRO-OS).
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
                           Mutex object.
 
     Redistribution and use in source and binary forms, with or without
