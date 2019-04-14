@@ -47,16 +47,20 @@ OS_TaskRetVal task2 (OS_TaskParam arg)
 /*
 uint8_t task1Buffer [OS_MinTaskBufferSize ()];
 uint8_t task2Buffer [OS_MinTaskBufferSize ()];
-
-OS_TaskStart (task1Buffer, sizeof(task1Buffer), task1, NULL,
-              OS_TaskPriority_App1, "T1");
-OS_TaskStart (task2Buffer, sizeof(task2Buffer), task2, NULL,
-              OS_TaskPriority_App1, "T2");
 */
+
+
+uint8_t task1Buffer[1024];
+uint8_t task2Buffer[1024];
+
 
 OS_TaskRetVal boot (OS_TaskParam arg)
 {
+    OS_TaskStart (task1Buffer, sizeof(task1Buffer), task1, NULL,
+                  OS_TaskPriority_Drv1, "T1");
 
+    OS_TaskStart (task2Buffer, sizeof(task2Buffer), task2, NULL,
+                  OS_TaskPriority_Drv1, "T2");
 
     return 0;
 }
@@ -71,7 +75,6 @@ int main ()
     uint8_t initBuffer [OS_InitBufferSize ()];
 
     OS_Init (initBuffer);
-
     OS_Start (boot);
 
     Board_LED_Toggle (LEDS_LED1);

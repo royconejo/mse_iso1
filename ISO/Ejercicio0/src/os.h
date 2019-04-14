@@ -35,14 +35,14 @@
 #include <stdint.h>
 
 
-typedef uint32_t                OS_TaskRetVal;
-typedef void *                  OS_TaskParam;
-typedef uint64_t                OS_Ticks;
-typedef OS_TaskRetVal           (*OS_Task) (OS_TaskParam);
-typedef void                    (*OS_TickHook) (OS_Ticks ticks);
+typedef uint32_t                    OS_TaskRetVal;
+typedef void *                      OS_TaskParam;
+typedef uint64_t                    OS_Ticks;
+typedef OS_TaskRetVal               (*OS_Task) (OS_TaskParam);
+typedef void                        (*OS_TickHook) (OS_Ticks ticks);
 
-#define OS_ENUM_FORCE_UINT32(s) s ## __FORCE32 = ((uint32_t) - 1)
-#define OS_NO_RETURN            __attribute__((noreturn))
+#define OS_ENUM_FORCE_UINT32(s)     s ## __FORCE32 = ((uint32_t) - 1)
+#define OS_NO_RETURN                __attribute__((noreturn))
 
 
 enum OS_Result
@@ -76,20 +76,20 @@ enum OS_RunMode
 enum OS_TaskPriority
 {
     OS_ENUM_FORCE_UINT32 (OS_TaskPriority),
-    OS_TaskPriority__BEGIN      = 0,
-    OS_TaskPriority_Boot        = OS_TaskPriority__BEGIN,
-    OS_TaskPriority_DrvHighest,
-    OS_TaskPriority_Drv0        = OS_TaskPriority_DrvHighest,
+    OS_TaskPriority_Boot        = 0,
+    OS_TaskPriority_Drv0,
     OS_TaskPriority_Drv1,
     OS_TaskPriority_Drv2,
-    OS_TaskPriority_DrvLowest   = OS_TaskPriority_Drv2,
-    OS_TaskPriority_AppHighest,
-    OS_TaskPriority_App0        = OS_TaskPriority_AppHighest,
+    OS_TaskPriority_App0,
     OS_TaskPriority_App1,
     OS_TaskPriority_App2,
-    OS_TaskPriority_AppLowest   = OS_TaskPriority_App2,
     OS_TaskPriority_Idle,
-    OS_TaskPriority__COUNT
+    OS_TaskPriority__COUNT,
+    OS_TaskPriority__BEGIN      = OS_TaskPriority_Boot,
+    OS_TaskPriority_DrvHighest  = OS_TaskPriority_Drv0,
+    OS_TaskPriority_DrvLowest   = OS_TaskPriority_Drv2,
+    OS_TaskPriority_AppHighest  = OS_TaskPriority_App0,
+    OS_TaskPriority_AppLowest   = OS_TaskPriority_App2
 };
 
 

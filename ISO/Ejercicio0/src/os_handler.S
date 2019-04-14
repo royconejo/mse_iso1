@@ -2,7 +2,7 @@
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
-                          SVC, PendSV handlers for syscall and context switch.
+                          SVC, PendSV handlers for syscalls and context switch.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -40,58 +40,42 @@
 .text
 
 .extern OS_Scheduler
-.extern OS_SysCallHandler
+.extern OS_SyscallHandler
 
-.global OS_SysCall
+.global OS_Syscall
 .global SVC_Handler
 .global PendSV_Handler
 
 
 .thumb_func
-    OS_SysCall:
+    OS_Syscall:
             mrs      r3, control
             tst      r3, CONTROL_PSP
-            beq      .sysCallError
+            beq      .syscallError
             svc      0
             bx       lr
-        .sysCallError:
-            pop      {r0}
-            mov      r0, #1                @ OS_Result_InvalidCall
-            push     {r0}
+        .syscallError:
+            mov      r0, #1             @ return OS_Result_InvalidCall
             bx       lr
 
 
 .thumb_func
     SVC_Handler:
             tst      lr, EXC_RETURN_PSP
-            bne      .fromPspChecked    @ Must have been called from a PSP task
+            bne      .fromPSP           @ Must have been called from a PSP task
             bkpt     #0
             pop      {r0}               @ Pop original R0 value on MSP
             mov      r0, #1             @ OS_Result_InvalidCall
             push     {r0}               @ Push return value to R0 on MSP
             bx       lr
-        .fromPspChecked:
-        @@ ES NECESARIO GUARDAR EL CONTEXTO DE PSP?? POR QUE?
-        @    mrs      r12, psp           @ Store high registers from caller task
-        @    tst      lr, EXC_RETURN_FPU
-        @    it       eq
-        @    vstmdbeq r12!, {s16-s31}
-        @    stmfd    r12!, {r4-r11}
-        @    msr      psp, r12
-        @    isb
+        .fromPSP:
             push     {lr}
-            bl       OS_SysCallHandler
+            bl       OS_SyscallHandler
             pop      {lr}
-            push     {r0}               @ Push return value to MSP
             mrs      r12, psp
-        @    ldmfd    r12!, {r4-r11}
-        @    tst      lr, EXC_RETURN_FPU
-        @    it       eq
-        @    vldmiaeq r12!, {s16-s31}
-            ldmfd    r12!, {r0}         @ Pop original R0 value on PSP
-            pop      {r0}               @ restore return value to R0
+            ldmfd    r12!, {r1}         @ Pop original R0 value on PSP
             stmfd    r12!, {r0}         @ Push return value to R0 on PSP
-            msr      psp, r12
+            msr      psp, r12           @ Update PSP (not really needed)
             isb
             bx       lr
 

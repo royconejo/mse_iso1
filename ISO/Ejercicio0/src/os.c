@@ -130,7 +130,7 @@ void OS_Forever (OS_Task bootTask)
     DEBUG_Assert (!OS_RuntimeTask ());
     DEBUG_Assert (g_OS && bootTask);
 
-    enum OS_Result r = OS_SysCallBoot (OS_RunMode_Forever, bootTask);
+    enum OS_Result r = OS_SyscallBoot (OS_RunMode_Forever, bootTask);
     DEBUG_Assert (r == OS_Result_OK);
 
     // OS_Terminate() cannot be called on ON_RunMode_Forever so it should never
@@ -159,7 +159,7 @@ enum OS_Result OS_Start (OS_Task bootTask)
         return OS_Result_InvalidParams;
     }
 
-    enum OS_Result r = OS_SysCallBoot (OS_RunMode_Finite, bootTask);
+    enum OS_Result r = OS_SyscallBoot (OS_RunMode_Finite, bootTask);
     if (r != OS_Result_OK)
     {
         // Unrecoverable error while starting to boot
@@ -191,7 +191,7 @@ enum OS_Result OS_Terminate ()
         return OS_Result_InvalidCall;
     }
 
-    return OS_SysCall (OS_SysCall_Terminate, NULL);
+    return OS_Syscall (OS_Syscall_Terminate, NULL);
 }
 
 
@@ -219,7 +219,7 @@ enum OS_Result OS_TaskStart (void *taskBuffer, uint32_t taskBufferSize,
     ts.priority         = priority;
     ts.description      = description;
 
-    return OS_SysCall (OS_SysCall_TaskStart, &ts);
+    return OS_Syscall (OS_Syscall_TaskStart, &ts);
 }
 
 
@@ -234,7 +234,7 @@ enum OS_Result OS_TaskTerminate (void *taskBuffer, OS_TaskRetVal retVal)
     tt.retVal   = retVal;
     tt.task     = (struct OS_TaskControl *) taskBuffer;
 
-    return OS_SysCall (OS_SysCall_TaskTerminate, &tt);
+    return OS_Syscall (OS_Syscall_TaskTerminate, &tt);
 }
 
 
@@ -272,7 +272,7 @@ enum OS_Result OS_TaskYield ()
         return OS_Result_OK;
     }
 
-    return OS_SysCall (OS_SysCall_TaskYield, NULL);
+    return OS_Syscall (OS_Syscall_TaskYield, NULL);
 }
 
 
@@ -282,13 +282,13 @@ enum OS_Result OS_TaskDelayFrom (OS_Ticks ticks, OS_Ticks from)
     df.ticks    = ticks;
     df.from     = from;
 
-    return OS_SysCall (OS_SysCall_TaskDelayFrom, &df);
+    return OS_Syscall (OS_Syscall_TaskDelayFrom, &df);
 }
 
 
 enum OS_Result OS_TaskPeriodicDelay (OS_Ticks ticks)
 {
-    return OS_SysCall (OS_SysCall_TaskPeriodicDelay, &ticks);
+    return OS_Syscall (OS_Syscall_TaskPeriodicDelay, &ticks);
 }
 
 
@@ -307,7 +307,7 @@ enum OS_Result OS_TaskWaitForSignal (enum OS_TaskSignalType sigType,
     wfs.start       = OS_GetTicks ();
     wfs.timeout     = timeout;
 
-    return OS_SysCall (OS_SysCall_TaskWaitForSignal, &wfs);
+    return OS_Syscall (OS_Syscall_TaskWaitForSignal, &wfs);
 }
 
 

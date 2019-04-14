@@ -198,6 +198,7 @@ inline static void schedulerSetCurrentTaskToRun (uint32_t now)
 
     switch (g_OS->currentTask->priority)
     {
+        case OS_TaskPriority_Boot:
         case OS_TaskPriority_Drv0:
         case OS_TaskPriority_Drv1:
         case OS_TaskPriority_Drv2:
@@ -294,7 +295,7 @@ uint32_t OS_Scheduler (uint32_t currentSp, uint32_t taskCycles)
     // There must be no task selected at this point
     DEBUG_Assert (!g_OS->currentTask);
 
-    // Find the next task according to priority in a round-robin scheme.
+    // Find the next task according to priority on a round-robin scheme.
     for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
         struct QUEUE *queue = &g_OS->tasksReady[i];
@@ -306,7 +307,7 @@ uint32_t OS_Scheduler (uint32_t currentSp, uint32_t taskCycles)
         }
     }
 
-    // Set the selected task to be ready to run
+    // Set the selected task ready to run
     schedulerSetCurrentTaskToRun (Now);
 
     OS_SchedulerTickBarrier__CHECK ();
@@ -324,8 +325,6 @@ void OS_SchedulerWakeup ()
     SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
     __DSB ();
     __ISB ();
-
-    // TODO: chequera que aca efectivamente ya se haya llamado a interrupcion!
 }
 
 

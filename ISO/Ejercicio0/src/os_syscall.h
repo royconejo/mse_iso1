@@ -35,17 +35,17 @@
 #include "os.h"
 
 
-enum OS_SysCall
+enum OS_Syscall
 {
-    OS_ENUM_FORCE_UINT32 (OS_SysCall),
-    OS_SysCall_TaskBootEnded = 0,
-    OS_SysCall_TaskStart,
-    OS_SysCall_TaskYield,
-    OS_SysCall_TaskWaitForSignal,
-    OS_SysCall_TaskDelayFrom,
-    OS_SysCall_TaskPeriodicDelay,
-    OS_SysCall_TaskTerminate,
-    OS_SysCall_Terminate
+    OS_ENUM_FORCE_UINT32 (OS_Syscall),
+    OS_Syscall_TaskBootEnded = 0,
+    OS_Syscall_TaskStart,
+    OS_Syscall_TaskYield,
+    OS_Syscall_TaskWaitForSignal,
+    OS_Syscall_TaskDelayFrom,
+    OS_Syscall_TaskPeriodicDelay,
+    OS_Syscall_TaskTerminate,
+    OS_Syscall_Terminate
 };
 
 
@@ -84,6 +84,6 @@ struct OS_TaskTerminate
 };
 
 
-extern enum OS_Result   OS_SysCall      (enum OS_SysCall call, void *params);
-enum OS_Result          OS_SysCallBoot  (enum OS_RunMode runMode,
+extern enum OS_Result   OS_Syscall      (enum OS_Syscall call, void *params);
+enum OS_Result          OS_SyscallBoot  (enum OS_RunMode runMode,
                                          OS_Task bootTask);

@@ -65,7 +65,7 @@ static void taskBootReturn (OS_TaskRetVal retValue)
         }
     }
 
-    OS_SysCall (OS_SysCall_TaskBootEnded, NULL);
+    OS_Syscall (OS_Syscall_TaskBootEnded, NULL);
 }
 
 
@@ -75,7 +75,7 @@ static void taskCommonReturn (OS_TaskRetVal retValue)
     tt.retVal   = retValue;
     tt.task     = OS_TaskSelf ();
 
-    OS_SysCall (OS_SysCall_TaskTerminate, &tt);
+    OS_Syscall (OS_Syscall_TaskTerminate, &tt);
 }
 
 
@@ -374,20 +374,18 @@ static enum OS_Result taskTerminate (struct OS_TaskTerminate *tt)
     tt->task->state         = OS_TaskState_Terminated;
     tt->task->terminatedAt  = OS_GetTicks ();
 
-    // Right now there is no running task in the scheduler. Let's suppose
-    // task was the current task running and it has been cleared when
-    // terminated. Call the scheduler to assign a new task.
+    // If there is no current task, it is assumed that the current running task
+    // has been terminated itself (see above), so a scheduler wakeup is needed
+    // to assign a new current task. The terminated task stack pointer that
+    // called this syscall will no longer be used; it will never receive and
+    // process this return value.
     if (!g_OS->currentTask)
     {
         OS_SchedulerWakeup ();
-        // If closed from the same task (task auto-termination) the scheduler
-        // will switch to another tasks and this stack pointer will no longer
-        // be used.
-        DEBUG_Assert (false);
-        return OS_Result_WontGetHere;
+        return OS_Result_OK;
     }
 
-    // Check that there is a current task terminating another "task".
+    // Check that there is actually a current task terminating another "task".
     DEBUG_Assert (g_OS->currentTask != tt->task);
 
     return OS_Result_OK;
@@ -414,7 +412,7 @@ enum OS_Result osTerminate ()
 }
 
 
-enum OS_Result OS_SysCallHandler (enum OS_SysCall call, void *params)
+enum OS_Result OS_SyscallHandler (enum OS_Syscall call, void *params)
 {
     if (!g_OS)
     {
@@ -423,29 +421,29 @@ enum OS_Result OS_SysCallHandler (enum OS_SysCall call, void *params)
 
     switch (call)
     {
-        case OS_SysCall_TaskBootEnded:
+        case OS_Syscall_TaskBootEnded:
             return taskBootEnded ();
 
-        case OS_SysCall_TaskStart:
+        case OS_Syscall_TaskStart:
             return taskStart ((struct OS_TaskStart *) params);
 
-        case OS_SysCall_TaskYield:
+        case OS_Syscall_TaskYield:
             OS_SchedulerWakeup ();
             return OS_Result_OK;
 
-        case OS_SysCall_TaskWaitForSignal:
+        case OS_Syscall_TaskWaitForSignal:
             return taskWaitForSignal ((struct OS_TaskWaitForSignal *) params);
 
-        case OS_SysCall_TaskDelayFrom:
+        case OS_Syscall_TaskDelayFrom:
             return taskDelayFrom ((struct OS_TaskDelayFrom *) params);
 
-        case OS_SysCall_TaskPeriodicDelay:
+        case OS_Syscall_TaskPeriodicDelay:
             return taskPeriodicDelay ((OS_Ticks *) params);
 
-        case OS_SysCall_TaskTerminate:
+        case OS_Syscall_TaskTerminate:
             return taskTerminate ((struct OS_TaskTerminate *) params);
 
-        case OS_SysCall_Terminate:
+        case OS_Syscall_Terminate:
             return osTerminate ();
 
         default:
@@ -457,7 +455,7 @@ enum OS_Result OS_SysCallHandler (enum OS_SysCall call, void *params)
 
 
 // This function must only be called from MSP / Privileged mode.
-enum OS_Result OS_SysCallBoot (enum OS_RunMode runMode, OS_Task bootTask)
+enum OS_Result OS_SyscallBoot (enum OS_RunMode runMode, OS_Task bootTask)
 {
     if (!g_OS)
     {
