@@ -13,7 +13,7 @@ void HardFault_Handler()
 }
 
 
-OS_TaskRet task1 (OS_TaskParam arg)
+OS_TaskRetVal task1 (OS_TaskParam arg)
 {
     int x = 20;
 
@@ -21,16 +21,16 @@ OS_TaskRet task1 (OS_TaskParam arg)
     {
         Board_LED_Toggle (LEDS_LED3);
    //     for (int i = 0; i < 5000000; ++i);
-        OS_TaskPeriodicDelay (500);
+        enum OS_Result r = OS_TaskPeriodicDelay (500);
 	}
 
     OS_Terminate ();
 
-	OS_TaskReturn (0);
+	return 0;
 }
 
 
-OS_TaskRet task2 (OS_TaskParam arg)
+OS_TaskRetVal task2 (OS_TaskParam arg)
 {
     int x = 2;
 
@@ -38,12 +38,27 @@ OS_TaskRet task2 (OS_TaskParam arg)
     {
         Board_LED_Toggle (LEDS_LED2);
     //    for (int i = 0; i < 10000000; ++i);
-        OS_TaskPeriodicDelay (1000);
+        enum OS_Result r = OS_TaskPeriodicDelay (1000);
 	}
 
-    enum OS_Result r = OS_SystemCall (0xAAAA, 0xBBBB, 0xCCCC);
+	return 0xFFFFFFFF;
+}
 
-	OS_TaskReturn (0xFFFFFFFF);
+/*
+uint8_t task1Buffer [OS_MinTaskBufferSize ()];
+uint8_t task2Buffer [OS_MinTaskBufferSize ()];
+
+OS_TaskStart (task1Buffer, sizeof(task1Buffer), task1, NULL,
+              OS_TaskPriority_App1, "T1");
+OS_TaskStart (task2Buffer, sizeof(task2Buffer), task2, NULL,
+              OS_TaskPriority_App1, "T2");
+*/
+
+OS_TaskRetVal boot (OS_TaskParam arg)
+{
+
+
+    return 0;
 }
 
 
@@ -53,18 +68,11 @@ int main ()
 	SystemCoreClockUpdate ();
 	SYSTICK_SetMillisecondPeriod (1);
 
-    uint8_t initBuffer  [OS_InitBufferSize    ()];
-    uint8_t task1Buffer [OS_MinTaskBufferSize ()];
-    uint8_t task2Buffer [OS_MinTaskBufferSize ()];
+    uint8_t initBuffer [OS_InitBufferSize ()];
 
     OS_Init (initBuffer);
 
-    OS_TaskStart (task1Buffer, sizeof(task1Buffer), task1, NULL,
-                  OS_TaskPriority_App1, "T1");
-    OS_TaskStart (task2Buffer, sizeof(task2Buffer), task2, NULL,
-                  OS_TaskPriority_App1, "T2");
-
-    OS_Start ();
+    OS_Start (boot);
 
     Board_LED_Toggle (LEDS_LED1);
 

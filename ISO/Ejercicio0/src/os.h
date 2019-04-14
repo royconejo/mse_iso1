@@ -33,44 +33,52 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
 
-/*
-    RETRO-OS User API
-*/
 
-#define OS_TaskReturn(x)        return (x & ((uint32_t) - 1))
-
-typedef uint64_t                OS_TaskRet;
+typedef uint32_t                OS_TaskRetVal;
 typedef void *                  OS_TaskParam;
 typedef uint64_t                OS_Ticks;
-typedef OS_TaskRet              (*OS_Task) (OS_TaskParam);
+typedef OS_TaskRetVal           (*OS_Task) (OS_TaskParam);
 typedef void                    (*OS_TickHook) (OS_Ticks ticks);
 
-#define ENUM_FORCE_UINT32(s)    s ## __FORCE32 = ((uint32_t) - 1)
+#define OS_ENUM_FORCE_UINT32(s) s ## __FORCE32 = ((uint32_t) - 1)
+#define OS_NO_RETURN            __attribute__((noreturn))
 
 
 enum OS_Result
 {
-    ENUM_FORCE_UINT32 (OS_Result),
+    OS_ENUM_FORCE_UINT32 (OS_Result),
     OS_Result_OK            = 0,
     OS_Result_InvalidCall   = 1,
     OS_Result_InvalidParams,
+    OS_Result_InvalidBuffer,
     OS_Result_InvalidBufferAlignment,
     OS_Result_InvalidBufferSize,
     OS_Result_InvalidState,
+    OS_Result_InvalidOperation,
     OS_Result_Timeout,
     OS_Result_AlreadyInitialized,
     OS_Result_NotInitialized,
     OS_Result_NoCurrentTask,
+    OS_Result_WontGetHere
+};
+
+
+enum OS_RunMode
+{
+    OS_ENUM_FORCE_UINT32 (OS_RunMode),
+    OS_RunMode_Undefined    = 0,
+    OS_RunMode_Forever,
+    OS_RunMode_Finite
 };
 
 
 enum OS_TaskPriority
 {
-    ENUM_FORCE_UINT32 (OS_TaskPriority),
+    OS_ENUM_FORCE_UINT32 (OS_TaskPriority),
     OS_TaskPriority__BEGIN      = 0,
-    OS_TaskPriority_DrvHighest  = OS_TaskPriority__BEGIN,
+    OS_TaskPriority_Boot        = OS_TaskPriority__BEGIN,
+    OS_TaskPriority_DrvHighest,
     OS_TaskPriority_Drv0        = OS_TaskPriority_DrvHighest,
     OS_TaskPriority_Drv1,
     OS_TaskPriority_Drv2,
@@ -79,8 +87,7 @@ enum OS_TaskPriority
     OS_TaskPriority_App0        = OS_TaskPriority_AppHighest,
     OS_TaskPriority_App1,
     OS_TaskPriority_App2,
-    OS_TaskPriority_App3,
-    OS_TaskPriority_AppLowest   = OS_TaskPriority_App3,
+    OS_TaskPriority_AppLowest   = OS_TaskPriority_App2,
     OS_TaskPriority_Idle,
     OS_TaskPriority__COUNT
 };
@@ -88,7 +95,7 @@ enum OS_TaskPriority
 
 enum OS_TaskSignalType
 {
-    ENUM_FORCE_UINT32 (OS_TaskSignalType),
+    OS_ENUM_FORCE_UINT32 (OS_TaskSignalType),
     OS_TaskSignalType_SemaphoreAcquire = 0,
     OS_TaskSignalType_SemaphoreRelease,
     OS_TaskSignalType_MutexLock,
@@ -97,17 +104,6 @@ enum OS_TaskSignalType
 };
 
 
-enum OS_SystemCall
-{
-    ENUM_FORCE_UINT32 (OS_SystemCall),
-    OS_SystemCall_SchedulerWakeup   = 0,
-    OS_SystemCall_Yield             = OS_SystemCall_SchedulerWakeup,
-
-};
-
-
-enum OS_Result  OS_SystemCall           (enum OS_SystemCall call, void *params);
-
 OS_Ticks        OS_GetTicks             ();
 void            OS_SetTickHook          (OS_TickHook schedulerTickHook);
 
@@ -115,16 +111,17 @@ uint32_t        OS_InitBufferSize       ();
 uint32_t        OS_MinTaskBufferSize    ();
 
 enum OS_Result  OS_Init                 (void *buffer);
-void            OS_Forever              () __attribute__((noreturn));
-void            OS_Start                ();
-bool            OS_Terminate            ();
+void            OS_Forever              (OS_Task bootTask) OS_NO_RETURN;
+enum OS_Result  OS_Start                (OS_Task bootTask);
+enum OS_Result  OS_Terminate            ();
 
 enum OS_Result  OS_TaskStart            (void *taskBuffer,
                                          uint32_t taskBufferSize,
-                                         OS_Task task, void *taskParam,
+                                         OS_Task taskFunc, void *taskParam,
                                          enum OS_TaskPriority priority,
                                          const char *description);
-enum OS_Result  OS_TaskTerminate        (void *taskBuffer, OS_TaskRet retVal);
+enum OS_Result  OS_TaskTerminate        (void *taskBuffer,
+                                         OS_TaskRetVal retVal);
 void *          OS_TaskSelf             ();
 enum OS_Result  OS_TaskYield            ();
 enum OS_Result  OS_TaskPeriodicDelay    (OS_Ticks ticks);

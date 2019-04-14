@@ -2,7 +2,7 @@
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
-                          Non-user (internal) critical section functions.
+                          Scheduler functions.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -30,69 +30,14 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#include "os_critical.h"
-#include "debug.h"
-#include "chip.h"       // CMSIS
-#include <stdint.h>
+#pragma once
+
+#include "os.h"
 
 
-static volatile uint32_t g_OS_CriticalSection   = 0;
-static volatile uint32_t g_OS_SchedulingMisses  = 0;
+void            OS_SchedulerWakeup                  ();
+void            OS_SchedulerTickCallback            (OS_Ticks ticks);
 
-
-void OS_SchedulerWakeup ()
-{
-    if (!g_OS_CriticalSection)
-    {
-        SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
-        __DSB ();
-        __ISB ();
-
-        // TODO: chequera que aca efectivamente ya se haya llamado a interrupcion!
-    }
-    else
-    {
-        ++ g_OS_SchedulingMisses;
-    }
-}
-
-
-void OS_ResetSchedulingMisses ()
-{
-    g_OS_SchedulingMisses = 0;
-}
-
-
-void OS_CriticalSection__ENTER ()
-{
-    DEBUG_Assert (!g_OS_CriticalSection);
-
-    g_OS_CriticalSection = 1;
-}
-
-
-void OS_CriticalSection__LEAVE ()
-{
-    DEBUG_Assert (g_OS_CriticalSection);
-
-    g_OS_CriticalSection = 0;
-
-    if (g_OS_SchedulingMisses)
-    {
-        OS_SchedulerWakeup ();
-    }
-}
-
-
-void OS_CriticalSection__CLEAR ()
-{
-    DEBUG_Assert (g_OS_CriticalSection);
-
-    g_OS_CriticalSection = 0;
-}
-
-
-void OS_CriticalSection__RESET ()
-{
-    g_OS_CriticalSection = 0;
-}
+enum OS_Result  OS_SchedulerTickBarrier__ACTIVATE   ();
+enum OS_Result  OS_SchedulerTickBarrier__CHECK      ();
+enum OS_Result  OS_SchedulerTickBarrier__CLEAR      ();

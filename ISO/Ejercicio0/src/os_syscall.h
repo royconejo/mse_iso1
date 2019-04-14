@@ -2,7 +2,7 @@
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
-                          Non-user (internal) critical section functions.
+                          System calls.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -32,12 +32,58 @@
 */
 #pragma once
 
-#include <stdint.h>
+#include "os.h"
 
 
-void    OS_SchedulerWakeup          ();
-void    OS_ResetSchedulingMisses    ();
-void    OS_CriticalSection__ENTER   ();
-void    OS_CriticalSection__LEAVE   ();
-void    OS_CriticalSection__CLEAR   ();
-void    OS_CriticalSection__RESET   ();
+enum OS_SysCall
+{
+    OS_ENUM_FORCE_UINT32 (OS_SysCall),
+    OS_SysCall_TaskBootEnded = 0,
+    OS_SysCall_TaskStart,
+    OS_SysCall_TaskYield,
+    OS_SysCall_TaskWaitForSignal,
+    OS_SysCall_TaskDelayFrom,
+    OS_SysCall_TaskPeriodicDelay,
+    OS_SysCall_TaskTerminate,
+    OS_SysCall_Terminate
+};
+
+
+// SysCall params
+struct OS_TaskStart
+{
+    void                    *taskBuffer;
+    uint32_t                taskBufferSize;
+    OS_Task                 taskFunc;
+    void                    *taskParam;
+    enum OS_TaskPriority    priority;
+    const char              *description;
+};
+
+
+struct OS_TaskWaitForSignal
+{
+    enum OS_TaskSignalType  sigType;
+    void                    *sigObject;
+    OS_Ticks                start;
+    OS_Ticks                timeout;
+};
+
+
+struct OS_TaskDelayFrom
+{
+    OS_Ticks                ticks;
+    OS_Ticks                from;
+};
+
+
+struct OS_TaskTerminate
+{
+    struct OS_TaskControl   *task;
+    OS_TaskRetVal           retVal;
+};
+
+
+extern enum OS_Result   OS_SysCall      (enum OS_SysCall call, void *params);
+enum OS_Result          OS_SysCallBoot  (enum OS_RunMode runMode,
+                                         OS_Task bootTask);

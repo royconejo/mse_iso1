@@ -31,12 +31,16 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 #include "os.h"
-#include "os_critical.h"
+#include "os_private.h"
+#include "os_scheduler.h"
+#include "os_syscall.h"
+#include "os_runtime.h"
+#include "os_mutex.h"
 #include "queue.h"
 #include "semaphore.h"
-#include "os_mutex.h"
 #include "debug.h"
 #include <string.h>
+#include <stdbool.h>
 #include "chip.h"   // CMSIS
 
 #ifndef RETROCIAA_OS_CUSTOM_SYSTICK
@@ -44,598 +48,8 @@
 #endif
 
 
-#define OS_StackBarrierValue        0xDEADBEEF
-#define OS_IntegerRegisters         17
-#define OS_FPointRegisters          (16 + 1 + 16)
-#define OS_ContextRegisters         (OS_FPointRegisters + OS_IntegerRegisters)
-// NOTE: this number must be big enough for any task to be able to execute the
-//       scheduler!
-#define OS_MinAppStackSize          128
-#define OS_TaskMinBufferSize        (sizeof(struct OS_TaskControl) \
-                                            + (OS_ContextRegisters * 4) \
-                                            + OS_MinAppStackSize)
-#define OS_UndefinedTicks           ((OS_Ticks) -1)
-#define OS_PerfTargetTicks          1000
-
-
-typedef uint64_t    OS_Cycles;
-typedef bool        (*OS_SigAction) (void *sig);
-
-
-static struct OS    *g_OS                   = NULL;
-static const char   *TaskNoDescription      = "N/A";
-static const char   *TaskIdleDescription    = "IDLE";
-
-extern void OS_SetAppStackPointer (uint32_t address);
-
-
-enum OS_TaskState
-{
-    OS_TaskState_Terminated,
-    OS_TaskState_Waiting,
-    OS_TaskState_Ready,
-    OS_TaskState_Running
-};
-
-
-struct OS_PerfData
-{
-    OS_Cycles               curCycles;
-    uint32_t                curSwitches;
-    OS_Cycles               lastCycles;
-    uint32_t                lastSwitches;
-    float                   lastUsage;
-};
-
-
-struct OS_TaskControl
-{
-    struct QUEUE_Node       node;
-    uint32_t                size;
-    const char              *description;
-    uint32_t                retValue;
-    OS_Ticks                startedAt;
-    OS_Ticks                terminatedAt;
-    OS_Ticks                suspendedUntil;
-    OS_Ticks                lastSuspension;
-    OS_SigAction            sigWaitAction;
-    void                    *sigWaitObject;
-    enum OS_Result          sigWaitResult;
-    OS_Cycles               runCycles;
-    struct OS_PerfData      performance;
-    enum OS_TaskPriority    priority;
-    enum OS_TaskState       state;
-    uint32_t                sp;
-    uint32_t                stackBarrier;
-};
-
-
-struct OS
-{
-    OS_Ticks                startedAt;
-    OS_Ticks                terminatedAt;
-    bool                    startedForever;
-    OS_Cycles               schedulerRunCycles;
-    uint32_t                perfTargetTicks;
-    uint32_t                perfTargetTicksCount;
-    float                   perfCyclesPerTargetTicks;
-    bool                    perfNewMeasureBegins;
-    struct OS_PerfData      performance;
-   // The only one task in the RUNNING state
-   struct OS_TaskControl    *currentTask;
-   // Tasks in READY state
-   struct QUEUE             tasksReady      [OS_TaskPriority__COUNT];
-   // Tasks in WAITING state
-   struct QUEUE             tasksWaiting    [OS_TaskPriority__COUNT];
-   // Idle task buffer (this task is internal and belongs to the OS)
-   uint8_t                  idleTaskBuffer  [OS_TaskMinBufferSize];
-};
-
-
-static OS_TaskRet taskIdle (OS_TaskParam arg)
-{
-    while (1)
-    {
-        __WFI ();
-    }
-
-    OS_TaskReturn (0);
-}
-
-
-static void schedulerTick (OS_Ticks ticks)
-{
-    OS_SchedulerWakeup ();
-}
-
-
-static void startOs (bool forever)
-{
-    DEBUG_Assert (g_OS);
-
-    g_OS->startedForever = forever;
-
-    OS_SetTickHook (schedulerTick);
-}
-
-
-static void terminateOs ()
-{
-    DEBUG_Assert (g_OS && !g_OS->startedForever);
-
-    OS_SetTickHook (NULL);
-    g_OS = NULL;
-}
-
-
-static void taskYield ()
-{
-    OS_SchedulerWakeup ();
-}
-
-
-// when a task returns from its main function it is assumed that taskControl
-// is NULL (R1 == 0). This is achieved by returning an unit64_t from the tasks.
-static void taskTerminate (uint32_t retValue,
-                           struct OS_TaskControl *taskControl)
-{
-    OS_CriticalSection__ENTER ();
-
-    // Tasks can be abruptly terminated by calling OS_TaskTerminate(TaskBuffer)
-    // from another task.
-
-    // Own task returning from its main function or by calling
-    // OS_TaskTerminate(NULL, x).
-    if (!taskControl)
-    {
-        DEBUG_Assert (g_OS->currentTask->state == OS_TaskState_Running);
-
-        taskControl = g_OS->currentTask;
-    }
-    else if (taskControl->state == OS_TaskState_Terminated)
-    {
-        // Trying to termine an already terminated task, do nothing.
-        return;
-    }
-
-    switch (taskControl->state)
-    {
-        case OS_TaskState_Running:
-            g_OS->currentTask = NULL;
-            break;
-
-        case OS_TaskState_Ready:
-            QUEUE_DetachNode (&g_OS->tasksReady[taskControl->priority],
-                                            (struct QUEUE_Node *) taskControl);
-            break;
-
-        case OS_TaskState_Waiting:
-            QUEUE_DetachNode (&g_OS->tasksWaiting[taskControl->priority],
-                                            (struct QUEUE_Node *) taskControl);
-            break;
-
-        default:
-            // Invalid state
-            DEBUG_Assert (false);
-            break;
-    }
-
-    taskControl->retValue       = retValue;
-    taskControl->state          = OS_TaskState_Terminated;
-    taskControl->terminatedAt   = OS_GetTicks ();
-
-    // There is no running task in the scheduler.
-    if (!g_OS->currentTask)
-    {
-        OS_CriticalSection__CLEAR ();
-        OS_SchedulerWakeup ();
-        // If closed from the same task (task auto-termination) the stack
-        // pointer is no longer used. Context gets trapped in an infinite loop
-        // (for debug purposes only).
-        while (1)
-        {
-            __WFI ();
-        }
-    }
-
-    OS_CriticalSection__LEAVE ();
-}
-
-
-static void taskStackInit (struct OS_TaskControl *taskControl, OS_Task task,
-                           void *taskParam)
-{
-    uint32_t *stackTop = &((uint32_t *)taskControl) [(taskControl->size >> 2)];
-
-    // Registers automatically stacked when entering the handler
-    // Values in this stack substitutes those.
-    *(--stackTop) = 1 << 24;                  // xPSR.T = 1
-    *(--stackTop) = (uint32_t) task;          // xPC
-    *(--stackTop) = (uint32_t) taskTerminate; // xLR
-    *(--stackTop) = 0;                        // R12
-    *(--stackTop) = 0;                        // R3
-    *(--stackTop) = 0;                        // R2
-    *(--stackTop) = 0;                        // R1
-    *(--stackTop) = (uint32_t) taskParam;     // R0
-    // LR pushed at interrupt handler. Here artificially set to return to
-    // threaded PSP with FPU registers still unused.
-    *(--stackTop) = 0xFFFFFFFD;               // LR IRQ
-    // R4-R11 pushed at interrupt handler.
-    *(--stackTop) = 0;                        // R11
-    *(--stackTop) = 0;                        // R10
-    *(--stackTop) = 0;                        // R9
-    *(--stackTop) = 0;                        // R8
-    *(--stackTop) = 0;                        // R7
-    *(--stackTop) = 0;                        // R6
-    *(--stackTop) = 0;                        // R5
-    *(--stackTop) = 0;                        // R4
-
-    taskControl->sp = (uint32_t) stackTop;
-}
-
-
-static bool taskSigActionSemaphoreAcquire (void *sig)
-{
-    return SEMAPHORE_Acquire ((struct SEMAPHORE *) sig);
-}
-
-
-static bool taskSigActionSemaphoreRelease (void *sig)
-{
-    return SEMAPHORE_Release ((struct SEMAPHORE *) sig);
-}
-
-
-static bool taskSigActionMutexLock (void *sig)
-{
-    return OS_MUTEX_Lock ((struct OS_MUTEX *) sig);
-}
-
-
-static bool taskSigActionMutexUnlock (void *sig)
-{
-    return OS_MUTEX_Unlock ((struct OS_MUTEX *) sig);
-}
-
-
-inline static void taskSigWaitEnd (struct OS_TaskControl *tc,
-                                   enum OS_Result result)
-{
-    tc->sigWaitAction = NULL;
-    tc->sigWaitObject = NULL;
-    tc->sigWaitResult = result;
-}
-
-
-static void taskUpdateState (struct OS_TaskControl *tc, OS_Ticks now)
-{
-    // "Suspended until" still in the future.
-    if (tc->suspendedUntil > now)
-    {
-        // No signal, keep waiting.
-        if (!tc->sigWaitAction)
-        {
-            tc->state = OS_TaskState_Waiting;
-            return;
-        }
-
-        DEBUG_Assert (tc->sigWaitObject);
-
-        // Trick to be able to get the correct OS_TaskSelf () in signal action.
-        struct OS_TaskControl *ctb = g_OS->currentTask;
-        g_OS->currentTask = tc;
-
-        // if the signal the task was waiting for can be adquired then switch
-        // it to a ready state.
-        if (tc->sigWaitAction (tc->sigWaitObject))
-        {
-            taskSigWaitEnd (tc, OS_Result_OK);
-            tc->suspendedUntil = 0;
-        }
-
-        g_OS->currentTask = ctb;
-    }
-    // There is suspended time but it's no longer in the future.
-    // (tc->suspendedUntil > 0 && tc->suspendedUntil <= now)
-    else if (tc->suspendedUntil)
-    {
-        if (!tc->sigWaitAction)
-        {
-            tc->lastSuspension = tc->suspendedUntil;
-        }
-        else
-        {
-            taskSigWaitEnd (tc, OS_Result_Timeout);
-        }
-
-        tc->suspendedUntil = 0;
-    }
-
-    tc->state = OS_TaskState_Ready;
-}
-
-
-inline static enum OS_Result taskDelayFrom__BEGIN ()
-{
-    if (!g_OS)
-    {
-        return OS_Result_NotInitialized;
-    }
-
-    OS_CriticalSection__ENTER ();
-
-    if (!g_OS->currentTask)
-    {
-        OS_CriticalSection__LEAVE ();
-        return OS_Result_NoCurrentTask;
-    }
-
-    return OS_Result_OK;
-}
-
-
-inline static enum OS_Result taskDelayFrom__END (OS_Ticks ticks, OS_Ticks from)
-{
-    g_OS->currentTask->suspendedUntil = from + ticks;
-
-    OS_CriticalSection__CLEAR ();
-    taskYield ();
-
-    return OS_Result_OK;
-}
-
-
-inline static void perfCheckMeasuredPeriod ()
-{
-    if (g_OS->perfTargetTicksCount >= g_OS->perfTargetTicks)
-    {
-        g_OS->perfTargetTicksCount  = 0;
-        g_OS->perfNewMeasureBegins  = true;
-    }
-    else
-    {
-        g_OS->perfNewMeasureBegins  = false;
-    }
-}
-
-
-inline static void perfCloseLastMeasuredPeriod (struct OS_PerfData *pd)
-{
-    pd->lastUsage       = pd->curCycles * g_OS->perfCyclesPerTargetTicks;
-    pd->lastCycles      = pd->curCycles;
-    pd->lastSwitches    = pd->curSwitches;
-    pd->curCycles       = 0;
-    pd->curSwitches     = 0;
-}
-
-
-inline static void perfUpdateMeasures (struct OS_PerfData *pd,
-                                       OS_Cycles taskCycles)
-{
-    pd->curCycles += taskCycles;
-    ++ pd->curSwitches;
-}
-
-
-inline static void schedulerLastTaskUpdate (uint32_t currentSp,
-                                            uint32_t taskCycles,
-                                            uint32_t now)
-{
-    struct OS_TaskControl *ct = g_OS->currentTask;
-    if (!ct)
-    {
-        // if g_OS->currentTask == NULL, it is assumed that currentSp
-        // belongs to the first context or an already terminated task and
-        // therefore there is no corresponding task control register to
-        // store it.
-        return;
-    }
-
-    DEBUG_Assert (ct->state         == OS_TaskState_Running);
-    DEBUG_Assert (ct->stackBarrier  == OS_StackBarrierValue);
-
-    // Task switching from a previous running task
-    ct->runCycles  += taskCycles;
-    ct->sp          = currentSp;
-
-    perfUpdateMeasures (&ct->performance, taskCycles);
-
-    if (g_OS->perfNewMeasureBegins)
-    {
-        perfCloseLastMeasuredPeriod (&ct->performance);
-    }
-
-    taskUpdateState (ct, now);
-
-    switch (ct->state)
-    {
-        case OS_TaskState_Ready:
-            QUEUE_PushNode (&g_OS->tasksReady[ct->priority],
-                                            (struct QUEUE_Node *) ct);
-            break;
-
-        case OS_TaskState_Waiting:
-            QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
-                                            (struct QUEUE_Node *) ct);
-            break;
-
-        default:
-            // Invalid current task state for g_OS->currentTask.
-            DEBUG_Assert (false);
-            break;
-    }
-
-    DEBUG_Assert (ct->stackBarrier == OS_StackBarrierValue);
-
-    g_OS->currentTask = NULL;
-}
-
-
-inline static void schedulerSetCurrentTaskToRun (uint32_t now)
-{
-    // At least the idle task must have been selected.
-    DEBUG_Assert (g_OS->currentTask);
-
-    // Last check for stack bounds integrity
-    DEBUG_Assert (g_OS->currentTask->stackBarrier == OS_StackBarrierValue);
-
-    g_OS->currentTask->state = OS_TaskState_Running;
-
-    // First time running?
-    if (g_OS->currentTask->startedAt == OS_UndefinedTicks)
-    {
-        g_OS->currentTask->startedAt = now;
-    }
-
-    switch (g_OS->currentTask->priority)
-    {
-        case OS_TaskPriority_Drv0:
-        case OS_TaskPriority_Drv1:
-        case OS_TaskPriority_Drv2:
-            // CONTROL[0] = 0, Privileged in thread mode
-            __set_CONTROL ((__get_CONTROL() & ~0b1));
-            break;
-
-        default:
-            // CONTROL[0] = 1, User state in thread mode
-            __set_CONTROL ((__get_CONTROL() | 0b1));
-            break;
-    }
-}
-
-
-enum OS_Result OS_SystemCallHandler (enum OS_SystemCall call, void *params)
-{
-
-    switch (call)
-    {
-        case OS_SystemCall_Yield:
-
-
-    }
-
-
-
-
-
-    return 0xFFFFFFFF;
-}
-
-
-uint32_t OS_GetNextStackPointer (uint32_t currentSp, uint32_t taskCycles)
-{
-    DWT->CYCCNT = 0;
-
-    __CLREX ();
-
-    DEBUG_Assert (g_OS);
-
-    if (g_OS->terminatedAt != OS_UndefinedTicks)
-    {
-        return 0;
-    }
-
-    const OS_Ticks Now = OS_GetTicks ();
-
-    OS_CriticalSection__ENTER ();
-
-    OS_ResetSchedulingMisses ();
-
-    perfCheckMeasuredPeriod ();
-
-    // First scheduler run
-    if (!currentSp)
-    {
-        DEBUG_Assert (g_OS->startedAt == OS_UndefinedTicks);
-        DEBUG_Assert (!g_OS->currentTask);
-
-        g_OS->startedAt = Now;
-    }
-
-    // Updating tasks in waiting state.
-    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
-    {
-        struct QUEUE            *queue  = &g_OS->tasksWaiting[i];
-        struct OS_TaskControl   *task   = (struct OS_TaskControl *) queue->head;
-
-        while (task)
-        {
-            DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
-
-            taskUpdateState (task, Now);
-
-            if (task->state == OS_TaskState_Ready)
-            {
-                // Timeout reached. A ready task will be moved to the
-                // corresponding task list.
-                QUEUE_DetachNode (queue, (struct QUEUE_Node *) task);
-                QUEUE_PushNode   (&g_OS->tasksReady[i], (struct QUEUE_Node *)
-                                  task);
-            }
-            else if (g_OS->perfNewMeasureBegins)
-            {
-                // TaskState_Ready tasks will be checked in the scheduling loop
-                // below.
-                perfCloseLastMeasuredPeriod (&task->performance);
-            }
-
-            DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
-
-            task = (struct OS_TaskControl *) task->node.next;
-        }
-    }
-
-    // This is done at the first iteration of a new performance measurement
-    // period to update performance metrics for all ready tasks.
-    if (g_OS->perfNewMeasureBegins)
-    {
-        for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
-        {
-            struct QUEUE            *queue  = &g_OS->tasksReady[i];
-            struct OS_TaskControl   *task   = (struct OS_TaskControl *)
-                                                queue->head;
-            while (task)
-            {
-                perfCloseLastMeasuredPeriod (&task->performance);
-                task = (struct OS_TaskControl *) task->node.next;
-            }
-        }
-    }
-
-    // Update the last executed task, if there is one.
-    schedulerLastTaskUpdate (currentSp, taskCycles, Now);
-
-    // There must be no task selected at this point
-    DEBUG_Assert (!g_OS->currentTask);
-
-    // Find the next task according to priority in a round-robin scheme.
-    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
-    {
-        struct QUEUE *queue = &g_OS->tasksReady[i];
-        if (queue->head)
-        {
-            g_OS->currentTask = (struct OS_TaskControl *) queue->head;
-            QUEUE_DetachNode (queue, queue->head);
-            break;
-        }
-    }
-
-    // Set the selected task to be ready to run
-    schedulerSetCurrentTaskToRun (Now);
-
-    ++ g_OS->perfTargetTicksCount;
-
-    // Aprox. number of cycles used for task scheduling.
-    g_OS->schedulerRunCycles += DWT->CYCCNT;
-
-    OS_CriticalSection__CLEAR ();
-
-    return g_OS->currentTask->sp;
-}
-
-
 #ifdef RETROCIAA_SYSTICK
-inline OS_Ticks OS_GetTicks()
+inline OS_Ticks OS_GetTicks ()
 {
     return SYSTICK_Now ();
 }
@@ -662,6 +76,11 @@ uint32_t OS_MinTaskBufferSize ()
 
 enum OS_Result OS_Init (void *buffer)
 {
+    if (OS_RuntimeTask ())
+    {
+        return OS_Result_InvalidCall;
+    }
+
     if (g_OS)
     {
         return OS_Result_AlreadyInitialized;
@@ -676,14 +95,11 @@ enum OS_Result OS_Init (void *buffer)
 
     memset (os, 0, sizeof(struct OS));
 
-    // PendSV with minimum priority
-    NVIC_SetPriority (PendSV_IRQn, (1 << __NVIC_PRIO_BITS) - 1);
-
-    // SVC with minimum - 1 priority
-    NVIC_SetPriority (SVCall_IRQn, (1 << __NVIC_PRIO_BITS) - 2);
-
-    // Highest priority for Systick
-    NVIC_SetPriority (SysTick_IRQn, 0);
+    // Highest priority for Systick, second high for SVC and third to PendSV.
+    // This is a design choice.
+    NVIC_SetPriority (SysTick_IRQn  ,0);
+    NVIC_SetPriority (SVCall_IRQn   ,1);
+    NVIC_SetPriority (PendSV_IRQn   ,2);
 
     // Enable MCU cycle counter
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
@@ -696,34 +112,29 @@ enum OS_Result OS_Init (void *buffer)
 
     os->startedAt                   = OS_UndefinedTicks;
     os->terminatedAt                = OS_UndefinedTicks;
-    os->perfTargetTicks             = OS_PerfTargetTicks;
+    os->runMode                     = OS_RunMode_Undefined;
+    os->perfTargetTicksCount        = OS_PerfTargetTicks;
     // NOTE: a Tick rate of 1/1000 of a second is assumed!
     // 1000 - 100 (percent) = 10
     os->perfCyclesPerTargetTicks    = 1.0f / ((float) SystemCoreClock
-                                                / (float) os->perfTargetTicks
-                                                * 10.0f);
-    OS_CriticalSection__RESET   ();
-    OS_ResetSchedulingMisses    ();
-
+                                            / (float) os->perfTargetTicksCount
+                                            * 10.0f);
     g_OS = os;
-
-    // Idle task with lowest priority level (one point below lowest normal app
-    // priority).
-    OS_TaskStart (os->idleTaskBuffer, sizeof(os->idleTaskBuffer),
-                  taskIdle, NULL,
-                  OS_TaskPriority_Idle, TaskIdleDescription);
-
-    // PSP == 0 signals the first switch from msp to psp since initialization.
-    __set_PSP (0);
 
     return OS_Result_OK;
 }
 
 
-void OS_Forever ()
-{
-    startOs (true);
+void OS_Forever (OS_Task bootTask)
+{    
+    DEBUG_Assert (!OS_RuntimeTask ());
+    DEBUG_Assert (g_OS && bootTask);
 
+    enum OS_Result r = OS_SysCallBoot (OS_RunMode_Forever, bootTask);
+    DEBUG_Assert (r == OS_Result_OK);
+
+    // OS_Terminate() cannot be called on ON_RunMode_Forever so it should never
+    // get here.
     while (1)
     {
         __WFI ();
@@ -731,124 +142,99 @@ void OS_Forever ()
 }
 
 
-void OS_Start ()
+enum OS_Result OS_Start (OS_Task bootTask)
 {
-    startOs (false);
-
-    // First call to pendsv will do a context switch to the first available task
-    // defined in the OS (taskIdle if the user has not registered any task).
-    __WFI ();
-
-    // A context switch entering this point means the OS has been instructed to
-    // terminate.
-    OS_CriticalSection__ENTER ();
-
-    terminateOs ();
-
-    OS_CriticalSection__RESET ();
-}
-
-
-bool OS_Terminate ()
-{
-    if (!g_OS)
+    if (OS_RuntimeTask ())
     {
-        // Nothing to terminate
-        return true;
+        return OS_Result_InvalidCall;
     }
 
-    if (g_OS->startedForever)
-    {
-        // OS cannot be terminated
-        return false;
-    }
-
-    OS_CriticalSection__ENTER ();
-
-    g_OS->terminatedAt = OS_GetTicks ();
-
-    OS_CriticalSection__LEAVE ();
-
-    // When terminatedAt is given a valid number of ticks, there will be a
-    // context switch to resume execution at mainSp (which was the first context
-    // switched from in pendsv). After that, scheduler execution will be
-    // terminated along with any defined task.
-    while (1)
-    {
-        __WFI ();
-    }
-}
-
-
-enum OS_Result OS_TaskStart (void *taskBuffer, uint32_t taskBufferSize,
-                             OS_Task task, void *taskParam,
-                             enum OS_TaskPriority priority,
-                             const char *description)
-{
     if (!g_OS)
     {
         return OS_Result_NotInitialized;
     }
 
-    if (!task || priority >= OS_TaskPriority__COUNT)
+    if (!bootTask)
     {
         return OS_Result_InvalidParams;
     }
 
-    // taskBuffer pointer must be aligned on a 4 byte boundary
-    if ((uint32_t)taskBuffer & 0b11)
+    enum OS_Result r = OS_SysCallBoot (OS_RunMode_Finite, bootTask);
+    if (r != OS_Result_OK)
     {
-        return OS_Result_InvalidBufferAlignment;
+        // Unrecoverable error while starting to boot
+        DEBUG_Assert (false);
+        return r;
     }
+    ////////////////////////////////////////////////////////////////////////////
+    // if MSP returs to this point it means the OS has been instructed to
+    // terminate.
+    ////////////////////////////////////////////////////////////////////////////
+    DEBUG_Assert (!OS_RuntimeTask ());
+    DEBUG_Assert (g_OS && g_OS->runMode == OS_RunMode_Finite);
 
-    // taskBufferSize must be enough to run the scheduler and must be multiple
-    // of 4.
-    if (taskBufferSize < OS_TaskMinBufferSize || taskBufferSize & 0b11)
-    {
-        return OS_Result_InvalidBufferSize;
-    }
+    OS_SchedulerTickBarrier__ACTIVATE ();
 
-    if (!description)
-    {
-        description = TaskNoDescription;
-    }
+    OS_SetTickHook (NULL);
+    g_OS = NULL;
 
-    memset (taskBuffer, 0, taskBufferSize);
-
-    struct OS_TaskControl *taskControl = (struct OS_TaskControl *) taskBuffer;
-
-    taskControl->size           = taskBufferSize;
-    taskControl->description    = description;
-    taskControl->startedAt      = OS_UndefinedTicks;
-    taskControl->terminatedAt   = OS_UndefinedTicks;
-    taskControl->priority       = priority;
-    taskControl->state          = OS_TaskState_Ready;    
-    taskControl->stackBarrier   = OS_StackBarrierValue;
-
-    taskStackInit (taskControl, task, taskParam);
-
-    OS_CriticalSection__ENTER ();
-
-    QUEUE_PushNode  (&g_OS->tasksReady[taskControl->priority],
-                                            (struct QUEUE_Node *) taskControl);
-    OS_CriticalSection__LEAVE ();
-
-    DEBUG_Assert (taskControl->stackBarrier == OS_StackBarrierValue);
+    OS_SchedulerTickBarrier__CLEAR ();
 
     return OS_Result_OK;
 }
 
 
-enum OS_Result OS_TaskTerminate (void *taskBuffer, OS_TaskRet retVal)
+enum OS_Result OS_Terminate ()
 {
-    if (!g_OS)
+    if (!OS_RuntimePrivilegedTask ())
     {
-        return OS_Result_NotInitialized;
+        return OS_Result_InvalidCall;
     }
 
-    taskTerminate (retVal, (struct OS_TaskControl *) taskBuffer);
+    return OS_SysCall (OS_SysCall_Terminate, NULL);
+}
 
-    return OS_Result_OK;
+
+enum OS_Result OS_TaskStart (void *taskBuffer, uint32_t taskBufferSize,
+                             OS_Task taskFunc, void *taskParam,
+                             enum OS_TaskPriority priority,
+                             const char *description)
+{
+    if (!OS_RuntimePrivilegedTask ())
+    {
+        return OS_Result_InvalidCall;
+    }
+
+    if (priority < OS_TaskPriority_DrvHighest
+            || priority > OS_TaskPriority_AppLowest)
+    {
+        return OS_Result_InvalidParams;
+    }
+
+    struct OS_TaskStart ts;
+    ts.taskBuffer       = taskBuffer;
+    ts.taskBufferSize   = taskBufferSize;
+    ts.taskFunc         = taskFunc;
+    ts.taskParam        = taskParam;
+    ts.priority         = priority;
+    ts.description      = description;
+
+    return OS_SysCall (OS_SysCall_TaskStart, &ts);
+}
+
+
+enum OS_Result OS_TaskTerminate (void *taskBuffer, OS_TaskRetVal retVal)
+{
+    if (!OS_RuntimePrivilegedTask ())
+    {
+        return OS_Result_InvalidCall;
+    }
+
+    struct OS_TaskTerminate tt;
+    tt.retVal   = retVal;
+    tt.task     = (struct OS_TaskControl *) taskBuffer;
+
+    return OS_SysCall (OS_SysCall_TaskTerminate, &tt);
 }
 
 
@@ -865,34 +251,44 @@ void * OS_TaskSelf ()
 
 enum OS_Result OS_TaskYield ()
 {
-    if (!g_OS)
+    if (!OS_RuntimeTask ())
     {
-        return OS_Result_NotInitialized;
+        return OS_Result_InvalidCall;
     }
 
-    if (!g_OS->currentTask)
+    if (OS_RuntimePrivilegedTask ())
     {
-        return OS_Result_NoCurrentTask;
+        // Shortcut for privileged tasks
+        // (No need to call SVC to wakeup the scheduler)
+        if (!g_OS)
+        {
+            return OS_Result_NotInitialized;
+        }
+
+        // Only the already running task can yield the processor
+        DEBUG_Assert (g_OS->currentTask);
+
+        OS_SchedulerWakeup ();
+        return OS_Result_OK;
     }
 
-    taskYield ();
-    return OS_Result_OK;
-}
-
-
-enum OS_Result OS_TaskPeriodicDelay (OS_Ticks ticks)
-{
-    const enum OS_Result Result = taskDelayFrom__BEGIN ();
-    return (Result != OS_Result_OK)? Result
-                : taskDelayFrom__END (g_OS->currentTask->lastSuspension, ticks);
+    return OS_SysCall (OS_SysCall_TaskYield, NULL);
 }
 
 
 enum OS_Result OS_TaskDelayFrom (OS_Ticks ticks, OS_Ticks from)
 {
-    const enum OS_Result Result = taskDelayFrom__BEGIN ();
-    return (Result != OS_Result_OK)? Result
-                : taskDelayFrom__END (from, ticks);
+    struct OS_TaskDelayFrom df;
+    df.ticks    = ticks;
+    df.from     = from;
+
+    return OS_SysCall (OS_SysCall_TaskDelayFrom, &df);
+}
+
+
+enum OS_Result OS_TaskPeriodicDelay (OS_Ticks ticks)
+{
+    return OS_SysCall (OS_SysCall_TaskPeriodicDelay, &ticks);
 }
 
 
@@ -905,64 +301,13 @@ enum OS_Result OS_TaskDelay (OS_Ticks ticks)
 enum OS_Result OS_TaskWaitForSignal (enum OS_TaskSignalType sigType,
                                      void *sigObject, OS_Ticks timeout)
 {
-    if (!g_OS)
-    {
-        return OS_Result_NotInitialized;
-    }
+    struct OS_TaskWaitForSignal wfs;
+    wfs.sigType     = sigType;
+    wfs.sigObject   = sigObject;
+    wfs.start       = OS_GetTicks ();
+    wfs.timeout     = timeout;
 
-    if (!sigObject || sigType >= OS_TaskSignalType__COUNT)
-    {
-        return OS_Result_InvalidParams;
-    }
-
-    OS_CriticalSection__ENTER ();
-
-    if (!g_OS->currentTask)
-    {
-        OS_CriticalSection__LEAVE ();
-        return OS_Result_NoCurrentTask;
-    }
-
-    OS_SigAction sigAction = NULL;
-    switch (sigType)
-    {
-        case OS_TaskSignalType_SemaphoreAcquire:
-            sigAction = taskSigActionSemaphoreAcquire;
-            break;
-        case OS_TaskSignalType_SemaphoreRelease:
-            sigAction = taskSigActionSemaphoreRelease;
-            break;
-        case OS_TaskSignalType_MutexLock:
-            sigAction = taskSigActionMutexLock;
-            break;
-        case OS_TaskSignalType_MutexUnlock:
-            sigAction = taskSigActionMutexUnlock;
-            break;
-        default:
-            DEBUG_Assert (false);
-            break;
-    }
-
-    DEBUG_Assert (sigAction);
-
-    const bool ActionResult = sigAction (sigObject);
-
-    if (ActionResult || !timeout)
-    {
-        OS_CriticalSection__LEAVE ();
-        return ActionResult? OS_Result_OK : OS_Result_Timeout;
-    }
-
-    g_OS->currentTask->sigWaitAction    = sigAction;
-    g_OS->currentTask->sigWaitObject    = sigObject;
-    g_OS->currentTask->sigWaitResult    = OS_Result_NotInitialized;
-    g_OS->currentTask->suspendedUntil   = OS_GetTicks() + timeout;
-
-    OS_CriticalSection__CLEAR ();
-
-    taskYield ();
-
-    return g_OS->currentTask->sigWaitResult;
+    return OS_SysCall (OS_SysCall_TaskWaitForSignal, &wfs);
 }
 
 
@@ -973,14 +318,19 @@ enum OS_Result OS_TaskReturnValue (void *taskBuffer, uint32_t *retValue)
         return OS_Result_InvalidParams;
     }
 
-    struct OS_TaskControl *taskControl = (struct OS_TaskControl *) taskBuffer;
+    struct OS_TaskControl *task = (struct OS_TaskControl *) taskBuffer;
 
-    if (taskControl->state != OS_TaskState_Terminated)
+    if (task->stackBarrier != OS_StackBarrierValue)
+    {
+        return OS_Result_InvalidBuffer;
+    }
+
+    if (task->state != OS_TaskState_Terminated)
     {
         return OS_Result_InvalidState;
     }
 
-    *retValue = taskControl->retValue;
+    *retValue = task->retValue;
 
     return OS_Result_OK;
 }

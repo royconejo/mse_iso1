@@ -33,23 +33,32 @@
 #define DWT_CYCCNT	0xE0001004
 #define EXC_RETURN_FPU  0x00000010
 #define EXC_RETURN_PSP  0x00000004
+#define CONTROL_PSP     0x00000002
 
 .syntax unified
 .thumb
 .text
 
-.extern OS_GetNextStackPointer
-.extern OS_SystemCallHandler
+.extern OS_Scheduler
+.extern OS_SysCallHandler
 
-.global OS_SystemCall
+.global OS_SysCall
 .global SVC_Handler
 .global PendSV_Handler
 
 
 .thumb_func
-    OS_SystemCall:
-            svc   0
-            bx    lr
+    OS_SysCall:
+            mrs      r3, control
+            tst      r3, CONTROL_PSP
+            beq      .sysCallError
+            svc      0
+            bx       lr
+        .sysCallError:
+            pop      {r0}
+            mov      r0, #1                @ OS_Result_InvalidCall
+            push     {r0}
+            bx       lr
 
 
 .thumb_func
@@ -62,22 +71,23 @@
             push     {r0}               @ Push return value to R0 on MSP
             bx       lr
         .fromPspChecked:
-            mrs      r12, psp           @ Store high registers from caller task
-            tst      lr, EXC_RETURN_FPU
-            it       eq
-            vstmdbeq r12!, {s16-s31}
-            stmfd    r12!, {r4-r11}
-            msr      psp, r12
-            isb
+        @@ ES NECESARIO GUARDAR EL CONTEXTO DE PSP?? POR QUE?
+        @    mrs      r12, psp           @ Store high registers from caller task
+        @    tst      lr, EXC_RETURN_FPU
+        @    it       eq
+        @    vstmdbeq r12!, {s16-s31}
+        @    stmfd    r12!, {r4-r11}
+        @    msr      psp, r12
+        @    isb
             push     {lr}
-            bl       OS_SystemCallHandler
+            bl       OS_SysCallHandler
             pop      {lr}
             push     {r0}               @ Push return value to MSP
             mrs      r12, psp
-            ldmfd    r12!, {r4-r11}
-            tst      lr, EXC_RETURN_FPU
-            it       eq
-            vldmiaeq r12!, {s16-s31}
+        @    ldmfd    r12!, {r4-r11}
+        @    tst      lr, EXC_RETURN_FPU
+        @    it       eq
+        @    vldmiaeq r12!, {s16-s31}
             ldmfd    r12!, {r0}         @ Pop original R0 value on PSP
             pop      {r0}               @ restore return value to R0
             stmfd    r12!, {r0}         @ Push return value to R0 on PSP
@@ -103,12 +113,15 @@
             vstmdbeq r0!, {s16-s31}
             stmfd    r0!, {r4-r11, lr}
         .nextPSP:
-            ldr      r1, =DWT_CYCCNT
-            ldr      r1, [r1]
-            bl       OS_GetNextStackPointer
-            ldr      r2, =0
-            ldr      r1, =DWT_CYCCNT
-            str      r2, [r1]
+            clrex
+            mov      r2, #0
+            ldr      r3, =DWT_CYCCNT
+            ldr      r1, [r3]           @ Store cycle count
+            str      r2, [r3]           @ Zero cycle counter
+            bl       OS_Scheduler       @ R0: currentSp, R1: taskCycles
+            mov      r2, #0
+            ldr      r3, =DWT_CYCCNT
+            str      r2, [r3]           @ Zero cycle counter
             @ psp == 0, scheduler shut down, back to msp
             cbz      r0, .recoverMSP
         .updatePSP:
