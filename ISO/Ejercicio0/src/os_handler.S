@@ -100,7 +100,7 @@
             clrex
             mov      r2, #0
             ldr      r3, =DWT_CYCCNT
-            ldr      r1, [r3]           @ Store cycle count
+            ldr      r1, [r3]           @ Store cycle count in R1
             str      r2, [r3]           @ Zero cycle counter
             bl       OS_Scheduler       @ R0: currentSp, R1: taskCycles
             mov      r2, #0

@@ -33,6 +33,7 @@
 #include "os_scheduler.h"
 #include "os_private.h"
 #include "os_runtime.h"
+#include "os_usage.h"
 #include "debug.h"
 #include "chip.h"       // CMSYS
 
@@ -74,16 +75,18 @@ static void taskUpdateState (struct OS_TaskControl *tc, OS_Ticks now)
 
         g_OS->currentTask = ctb;
     }
-    // There is suspended time but it's no longer in the future.
+    // "suspendedUntil" is grater than zero and no longer in the future.
     // (tc->suspendedUntil > 0 && tc->suspendedUntil <= now)
     else if (tc->suspendedUntil)
     {
         if (!tc->sigWaitAction)
         {
+            // No signal, common delay is over.
             tc->lastSuspension = tc->suspendedUntil;
         }
         else
         {
+            // A signal action has been timed out.
             taskSigWaitEnd (tc, OS_Result_Timeout);
         }
 
@@ -94,78 +97,136 @@ static void taskUpdateState (struct OS_TaskControl *tc, OS_Ticks now)
 }
 
 
-inline static void perfCheckMeasuredPeriod (OS_Ticks now)
+inline static void schedulerUpdateWaitingTasks (const OS_Ticks Now)
 {
-    if (g_OS->perfTargetTicksNext >= now)
+    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
     {
-        g_OS->perfTargetTicksNext   = now + g_OS->perfTargetTicksCount;
-        g_OS->perfNewMeasureBegins  = true;
+        struct OS_TaskControl *task;
+
+        for (task = (struct OS_TaskControl *) g_OS->tasksWaiting[i].head; task;
+             task = (struct OS_TaskControl *) task->node.next)
+        {
+            DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
+
+            taskUpdateState (task, Now);
+
+            if (task->state == OS_TaskState_Ready)
+            {
+                // Timeout reached. This now ready task will be moved to its
+                // corresponding task list.
+                QUEUE_DetachNode (&g_OS->tasksWaiting[i],
+                                                (struct QUEUE_Node *) task);
+                QUEUE_PushNode   (&g_OS->tasksReady[i],
+                                                (struct QUEUE_Node *) task);
+            }
+
+            DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
+        }
     }
-    else
+}
+
+
+inline static void schedulerUpdateLastTaskMeasures ()
+{
+    // First iteration of a new performance measurement period?
+    if (!OS_USAGE_UpdatingLastMeasures (&g_OS->usage))
     {
-        g_OS->perfNewMeasureBegins  = false;
-    }
-}
-
-
-inline static void perfCloseLastMeasuredPeriod (struct OS_PerfData *pd)
-{
-    pd->lastUsage       = pd->curCycles * g_OS->perfCyclesPerTargetTicks;
-    pd->lastCycles      = pd->curCycles;
-    pd->lastSwitches    = pd->curSwitches;
-    pd->curCycles       = 0;
-    pd->curSwitches     = 0;
-}
-
-
-inline static void perfUpdateMeasures (struct OS_PerfData *pd,
-                                       OS_Cycles taskCycles)
-{
-    pd->curCycles += taskCycles;
-    ++ pd->curSwitches;
-}
-
-
-inline static void schedulerLastTaskUpdate (uint32_t currentSp,
-                                            uint32_t taskCycles,
-                                            uint32_t now)
-{
-    struct OS_TaskControl *ct = g_OS->currentTask;
-    if (!ct)
-    {
-        // if g_OS->currentTask == NULL, it is assumed that currentSp
-        // belongs to the first context or an already terminated task and
-        // therefore there is no corresponding task control register to
-        // store it.
+        // No, keep getting performance measurements from the running task on
+        // each context switch.
         return;
     }
 
-    DEBUG_Assert (ct->state         == OS_TaskState_Running);
-    DEBUG_Assert (ct->stackBarrier  == OS_StackBarrierValue);
-
-    // Task switching from a previous running task
-    ct->runCycles  += taskCycles;
-    ct->sp          = currentSp;
-
-    perfUpdateMeasures (&ct->performance, taskCycles);
-
-    if (g_OS->perfNewMeasureBegins)
+    // Process last period accumulated performance measurements for every task
+    // defined on every state (running, ready and waiting).
+    struct OS_TaskControl *task = g_OS->currentTask;
+    if (task)
     {
-        perfCloseLastMeasuredPeriod (&ct->performance);
+        const int32_t TaskMemory = OS_USAGE_GetUsedTaskMemory (task);
+        OS_USAGE_UpdateLastMeasures (&g_OS->usage, &task->usageCpu,
+                                        &task->usageMemory, TaskMemory,
+                                        task->size);
     }
 
-    taskUpdateState (ct, now);
+    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
+    {
+        for (task = (struct OS_TaskControl *) g_OS->tasksWaiting[i].head; task;
+             task = (struct OS_TaskControl *) task->node.next)
+        {
+            const int32_t TaskMemory = OS_USAGE_GetUsedTaskMemory (task);
+            OS_USAGE_UpdateLastMeasures (&g_OS->usage, &task->usageCpu,
+                                            &task->usageMemory, TaskMemory,
+                                            task->size);
+        }
 
-    switch (ct->state)
+        for (task = (struct OS_TaskControl *) g_OS->tasksReady[i].head; task;
+             task = (struct OS_TaskControl *) task->node.next)
+        {
+            const int32_t TaskMemory = OS_USAGE_GetUsedTaskMemory (task);
+            OS_USAGE_UpdateLastMeasures (&g_OS->usage, &task->usageCpu,
+                                            &task->usageMemory, TaskMemory,
+                                            task->size);
+        }
+    }
+}
+
+
+inline static void schedulerUpdateOwnMeasures ()
+{
+    // -Approximate- number of cycles used for task scheduling. It depends on
+    // 1) External interrupts preemting PendSV (*).
+    // 2) Code not taken into account after measurements took place
+    //    (ie DWT->CYCCNT).
+    // (*) Note that tasks can be preempted too.
+    OS_USAGE_UpdateCurrentMeasures (&g_OS->usage, &g_OS->usageCpu, NULL,
+                                   DWT->CYCCNT, 0);
+
+    if (OS_USAGE_UpdatingLastMeasures (&g_OS->usage))
+    {
+        OS_USAGE_UpdateLastMeasures (&g_OS->usage, &g_OS->usageCpu, NULL, 0, 0);
+    }
+}
+
+
+inline static void schedulerLastTaskUpdate (const uint32_t CurrentSp,
+                                            const uint32_t TaskCycles,
+                                            const uint32_t Now)
+{
+    struct OS_TaskControl *task = g_OS->currentTask;
+    if (!task)
+    {
+        // if g_OS->currentTask == NULL, it is assumed that CurrentSp belongs to
+        // the first context switch from MSP or an already terminated task,
+        // therefore there is no task control register to update.
+        return;
+    }
+
+    // Task switch from a previous running task.
+    DEBUG_Assert (task->state         == OS_TaskState_Running);
+    DEBUG_Assert (task->stackBarrier  == OS_StackBarrierValue);
+
+    // Store task last status.
+    task->runCycles += TaskCycles;
+    task->sp         = CurrentSp;
+
+    // Memory usage metrics always includes static use of the control structure
+    // (sizeof(OS_TaskControl)).
+    const int32_t CurMemory = OS_USAGE_GetUsedTaskMemory (task);
+
+    OS_USAGE_UpdateCurrentMeasures (&g_OS->usage, &task->usageCpu,
+                                   &task->usageMemory, TaskCycles, CurMemory);
+
+    taskUpdateState (task, Now);
+
+    switch (task->state)
     {
         case OS_TaskState_Ready:
-            QUEUE_PushNode (&g_OS->tasksReady[ct->priority],
-                                            (struct QUEUE_Node *) ct);
+            QUEUE_PushNode (&g_OS->tasksReady[task->priority],
+                                            (struct QUEUE_Node *) task);
             break;
 
         case OS_TaskState_Waiting:
-            QUEUE_PushNode (&g_OS->tasksWaiting[ct->priority],
-                                            (struct QUEUE_Node *) ct);
+            QUEUE_PushNode (&g_OS->tasksWaiting[task->priority],
+                                            (struct QUEUE_Node *) task);
             break;
 
         default:
@@ -174,18 +235,37 @@ inline static void schedulerLastTaskUpdate (uint32_t currentSp,
             break;
     }
 
-    DEBUG_Assert (ct->stackBarrier == OS_StackBarrierValue);
+    DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
 
     g_OS->currentTask = NULL;
 }
 
 
-inline static void schedulerSetCurrentTaskToRun (uint32_t now)
+inline static void schedulerFindNextTask ()
 {
-    // At least the idle task must have been selected.
+    // There must be no task selected at this point
+    DEBUG_Assert (!g_OS->currentTask);
+
+    // Find next task according to priority on a round-robin scheme.
+    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
+    {
+        struct QUEUE *queue = &g_OS->tasksReady[i];
+        if (queue->head)
+        {
+            g_OS->currentTask = (struct OS_TaskControl *) queue->head;
+            QUEUE_DetachNode (queue, queue->head);
+            break;
+        }
+    }
+}
+
+
+inline static void schedulerSetCurrentTaskReadyToRun (const uint32_t Now)
+{
+    // At least one task must have been selected.
     DEBUG_Assert (g_OS->currentTask);
 
-    // Last check for stack bounds integrity
+    // Last check for stack bounds integrity.
     DEBUG_Assert (g_OS->currentTask->stackBarrier == OS_StackBarrierValue);
 
     g_OS->currentTask->state = OS_TaskState_Running;
@@ -193,9 +273,10 @@ inline static void schedulerSetCurrentTaskToRun (uint32_t now)
     // First time running?
     if (g_OS->currentTask->startedAt == OS_UndefinedTicks)
     {
-        g_OS->currentTask->startedAt = now;
+        g_OS->currentTask->startedAt = Now;
     }
 
+    // Privilege level for Boot and Drv priorities. Unprivileged/User for App.
     switch (g_OS->currentTask->priority)
     {
         case OS_TaskPriority_Boot:
@@ -214,106 +295,51 @@ inline static void schedulerSetCurrentTaskToRun (uint32_t now)
 }
 
 
-uint32_t OS_Scheduler (uint32_t currentSp, uint32_t taskCycles)
+uint32_t OS_Scheduler (const uint32_t CurrentSp, const uint32_t TaskCycles)
 {
     DEBUG_Assert (g_OS);
 
+    // if terminatedAt has a valid amount of ticks, scheduler will return a
+    // special return value (0, closing) to the PendSV handler code.
     if (g_OS->terminatedAt != OS_UndefinedTicks)
     {
         return 0;
     }
 
+    // Avoid getting different tick readings along the scheduling process
+    // (May vary depending on external interrupts preemting PendSV).
     const OS_Ticks Now = OS_GetTicks ();
 
     // First scheduler run
-    if (!currentSp)
+    if (!CurrentSp)
     {
         DEBUG_Assert (g_OS->startedAt == OS_UndefinedTicks);
         DEBUG_Assert (!g_OS->currentTask);
 
-        g_OS->startedAt             = Now;
-        g_OS->perfTargetTicksNext   = Now + g_OS->perfTargetTicksCount;
-    }
-    else
-    {
-        perfCheckMeasuredPeriod (Now);
+        g_OS->startedAt = Now;
     }
 
-    // Updating tasks in waiting state.
-    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
-    {
-        struct QUEUE            *queue  = &g_OS->tasksWaiting[i];
-        struct OS_TaskControl   *task   = (struct OS_TaskControl *) queue->head;
-
-        while (task)
-        {
-            DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
-
-            taskUpdateState (task, Now);
-
-            if (task->state == OS_TaskState_Ready)
-            {
-                // Timeout reached. A ready task will be moved to the
-                // corresponding task list.
-                QUEUE_DetachNode (queue, (struct QUEUE_Node *) task);
-                QUEUE_PushNode   (&g_OS->tasksReady[i], (struct QUEUE_Node *)
-                                  task);
-            }
-            else if (g_OS->perfNewMeasureBegins)
-            {
-                // TaskState_Ready tasks will be checked in the scheduling loop
-                // below.
-                perfCloseLastMeasuredPeriod (&task->performance);
-            }
-
-            DEBUG_Assert (task->stackBarrier == OS_StackBarrierValue);
-
-            task = (struct OS_TaskControl *) task->node.next;
-        }
-    }
-
-    // This is done at the first iteration of a new performance measurement
-    // period to update performance metrics for all ready tasks.
-    if (g_OS->perfNewMeasureBegins)
-    {
-        for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
-        {
-            struct QUEUE            *queue  = &g_OS->tasksReady[i];
-            struct OS_TaskControl   *task   = (struct OS_TaskControl *)
-                                                queue->head;
-            while (task)
-            {
-                perfCloseLastMeasuredPeriod (&task->performance);
-                task = (struct OS_TaskControl *) task->node.next;
-            }
-        }
-    }
+    // Update tasks in waiting state.
+    schedulerUpdateWaitingTasks (Now);
 
     // Update the last executed task, if there is one.
-    schedulerLastTaskUpdate (currentSp, taskCycles, Now);
+    schedulerLastTaskUpdate (CurrentSp, TaskCycles, Now);
 
-    // There must be no task selected at this point
-    DEBUG_Assert (!g_OS->currentTask);
+    // Find next task.
+    schedulerFindNextTask ();
 
-    // Find the next task according to priority on a round-robin scheme.
-    for (int i = OS_TaskPriority__BEGIN; i < OS_TaskPriority__COUNT; ++i)
-    {
-        struct QUEUE *queue = &g_OS->tasksReady[i];
-        if (queue->head)
-        {
-            g_OS->currentTask = (struct OS_TaskControl *) queue->head;
-            QUEUE_DetachNode (queue, queue->head);
-            break;
-        }
-    }
+    // Set the selected task ready to be run.
+    schedulerSetCurrentTaskReadyToRun (Now);
 
-    // Set the selected task ready to run
-    schedulerSetCurrentTaskToRun (Now);
+    // Check if current usage measurement period has ended.
+    OS_USAGE_UpdateTarget (&g_OS->usage, Now);
 
+    // Update tasks and scheduler measurements accordingly.
+    schedulerUpdateLastTaskMeasures ();
+    schedulerUpdateOwnMeasures ();
+
+    // Clear tick barrier and set PendSV to pending again if needed.
     OS_SchedulerTickBarrier__CHECK ();
-
-    // Aprox. number of cycles used for task scheduling.
-    g_OS->schedulerRunCycles += DWT->CYCCNT;
 
     return g_OS->currentTask->sp;
 }
@@ -330,15 +356,14 @@ void OS_SchedulerWakeup ()
 
 void OS_SchedulerTickCallback (OS_Ticks ticks)
 {
-    // This function is always called in handler mode
-    // Barrier enabled or SysTick preemted a PendSV interrupt in progress?
-    # warning agregar pendsv en progreso
-    if (!g_OS_SchedulerTickBarrier )
+    // Don't set PendSV to pending if barrier is enabled.
+    if (!g_OS_SchedulerTickBarrier)
     {
         OS_SchedulerWakeup ();
     }
     else
     {
+        // ... but do record the number of missed attempts.
         ++ g_OS_SchedulerTicksMissed;
     }
 }

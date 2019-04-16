@@ -35,6 +35,7 @@
 #include "os_scheduler.h"
 #include "os_syscall.h"
 #include "os_runtime.h"
+#include "os_usage.h"
 #include "os_mutex.h"
 #include "queue.h"
 #include "semaphore.h"
@@ -95,11 +96,12 @@ enum OS_Result OS_Init (void *buffer)
 
     memset (os, 0, sizeof(struct OS));
 
-    // Highest priority for Systick, second high for SVC and third to PendSV.
-    // This is a design choice.
+    // Highest priority for Systick, second high for SVC and lowest for PendSV.
+    // Priorities for external interrupts -like those used for peripherals- must
+    // be set above SVCall and below PendSV.
     NVIC_SetPriority (SysTick_IRQn  ,0);
     NVIC_SetPriority (SVCall_IRQn   ,1);
-    NVIC_SetPriority (PendSV_IRQn   ,2);
+    NVIC_SetPriority (PendSV_IRQn   ,(1 << __NVIC_PRIO_BITS) - 1);
 
     // Enable MCU cycle counter
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
@@ -110,15 +112,12 @@ enum OS_Result OS_Init (void *buffer)
         QUEUE_Init (&os->tasksWaiting[i]);
     }
 
-    os->startedAt                   = OS_UndefinedTicks;
-    os->terminatedAt                = OS_UndefinedTicks;
-    os->runMode                     = OS_RunMode_Undefined;
-    os->perfTargetTicksCount        = OS_PerfTargetTicks;
-    // NOTE: a Tick rate of 1/1000 of a second is assumed!
-    // 1000 - 100 (percent) = 10
-    os->perfCyclesPerTargetTicks    = 1.0f / ((float) SystemCoreClock
-                                            / (float) os->perfTargetTicksCount
-                                            * 10.0f);
+    os->startedAt       = OS_UndefinedTicks;
+    os->terminatedAt    = OS_UndefinedTicks;
+    os->runMode         = OS_RunMode_Undefined;
+
+    OS_USAGE_Init (&os->usage);
+
     g_OS = os;
 
     return OS_Result_OK;
@@ -167,8 +166,7 @@ enum OS_Result OS_Start (OS_Task bootTask)
         return r;
     }
     ////////////////////////////////////////////////////////////////////////////
-    // if MSP returs to this point it means the OS has been instructed to
-    // terminate.
+    // MSP returs to this point when the OS has been instructed to terminate.
     ////////////////////////////////////////////////////////////////////////////
     DEBUG_Assert (!OS_RuntimeTask ());
     DEBUG_Assert (g_OS && g_OS->runMode == OS_RunMode_Finite);

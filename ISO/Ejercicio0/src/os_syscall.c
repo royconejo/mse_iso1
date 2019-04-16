@@ -149,6 +149,9 @@ static enum OS_Result taskStart (struct OS_TaskStart *ts)
     task->state          = OS_TaskState_Ready;
     task->stackBarrier   = OS_StackBarrierValue;
 
+    OS_USAGE_CpuReset    (&task->usageCpu);
+    OS_USAGE_MemoryReset (&task->usageMemory);
+
     OS_TaskReturn taskReturn = (task->priority == OS_TaskPriority_Boot)
                                                     ? taskBootReturn
                                                     : taskCommonReturn;

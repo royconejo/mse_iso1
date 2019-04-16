@@ -1,6 +1,7 @@
 #pragma once
 
 #include "os.h"
+#include "os_usage.h"
 #include "queue.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -15,10 +16,8 @@
                                             + (OS_ContextRegisters * 4) \
                                             + OS_MinAppStackSize)
 #define OS_UndefinedTicks           ((OS_Ticks) -1)
-#define OS_PerfTargetTicks          1000
 
 
-typedef uint64_t            OS_Cycles;
 typedef bool                (*OS_SigAction) (void *sig);
 typedef void                (*OS_TaskReturn) (OS_TaskRetVal retVal);
 
@@ -40,16 +39,6 @@ enum OS_TaskState
 };
 
 
-struct OS_PerfData
-{
-    OS_Cycles               curCycles;
-    uint32_t                curSwitches;
-    OS_Cycles               lastCycles;
-    uint32_t                lastSwitches;
-    float                   lastUsage;
-};
-
-
 struct OS_TaskControl
 {
     struct QUEUE_Node       node;
@@ -63,10 +52,11 @@ struct OS_TaskControl
     OS_SigAction            sigWaitAction;
     void                    *sigWaitObject;
     enum OS_Result          sigWaitResult;
-    OS_Cycles               runCycles;
-    struct OS_PerfData      performance;
     enum OS_TaskPriority    priority;
     enum OS_TaskState       state;
+    OS_Cycles               runCycles;
+    struct OS_USAGE_Cpu      usageCpu;
+    struct OS_USAGE_Memory   usageMemory;
     uint32_t                sp;
     uint32_t                stackBarrier;
 };
@@ -77,18 +67,15 @@ struct OS
     OS_Ticks                startedAt;
     OS_Ticks                terminatedAt;
     enum OS_RunMode         runMode;
-    OS_Cycles               schedulerRunCycles;
-    uint32_t                perfTargetTicksCount;
-    uint32_t                perfTargetTicksNext;
-    float                   perfCyclesPerTargetTicks;
-    bool                    perfNewMeasureBegins;
-    struct OS_PerfData      performance;
-   // The only one task in the RUNNING state
-   struct OS_TaskControl    *currentTask;
-   // Tasks in READY state
-   struct QUEUE             tasksReady          [OS_TaskPriority__COUNT];
-   // Tasks in WAITING state
-   struct QUEUE             tasksWaiting        [OS_TaskPriority__COUNT];
-   // Boot/Idle task buffer
-   uint8_t                  bootIdleTaskBuffer  [OS_TaskMinBufferSize];
+    OS_Cycles               runCycles;
+    struct OS_USAGE         usage;
+    struct OS_USAGE_Cpu      usageCpu;
+    // The only one task in the RUNNING state
+    struct OS_TaskControl   *currentTask;
+    // Tasks in READY state
+    struct QUEUE            tasksReady          [OS_TaskPriority__COUNT];
+    // Tasks in WAITING state
+    struct QUEUE            tasksWaiting        [OS_TaskPriority__COUNT];
+    // Boot/Idle task buffer
+    uint8_t                 bootIdleTaskBuffer  [OS_TaskMinBufferSize];
 };

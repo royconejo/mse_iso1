@@ -15,13 +15,13 @@ void HardFault_Handler()
 
 OS_TaskRetVal task1 (OS_TaskParam arg)
 {
-    int x = 20;
+    int x = 10;
 
 	while (x--)
     {
         Board_LED_Toggle (LEDS_LED3);
-   //     for (int i = 0; i < 5000000; ++i);
-        enum OS_Result r = OS_TaskPeriodicDelay (500);
+        for (int i = 0; i < 5000000; ++i);
+   //     enum OS_Result r = OS_TaskPeriodicDelay (500);
 	}
 
     OS_Terminate ();
@@ -32,13 +32,13 @@ OS_TaskRetVal task1 (OS_TaskParam arg)
 
 OS_TaskRetVal task2 (OS_TaskParam arg)
 {
-    int x = 2;
+    int x = 5;
 
 	while (x--)
     {
         Board_LED_Toggle (LEDS_LED2);
-    //    for (int i = 0; i < 10000000; ++i);
-        enum OS_Result r = OS_TaskPeriodicDelay (1000);
+       for (int i = 0; i < 10000000; ++i);
+    //    enum OS_Result r = OS_TaskPeriodicDelay (1000);
 	}
 
 	return 0xFFFFFFFF;
