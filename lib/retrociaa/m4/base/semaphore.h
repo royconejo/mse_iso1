@@ -1,10 +1,10 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Semaphore object and functions.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,25 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
 
+#include <stdint.h>
+#include <stdbool.h>
+
+
+#define SEMAPHORE_MaxResources      ((uint32_t) -1)
+
+
+struct SEMAPHORE
+{
+    uint32_t            resources;
+    volatile uint32_t   available;
+};
+
+
+bool        SEMAPHORE_Init          (struct SEMAPHORE *s, uint32_t resources,
+                                     uint32_t available);
+bool        SEMAPHORE_Acquire       (struct SEMAPHORE *s);
+bool        SEMAPHORE_Release       (struct SEMAPHORE *s);
+uint32_t    SEMAPHORE_Available     (struct SEMAPHORE *s);

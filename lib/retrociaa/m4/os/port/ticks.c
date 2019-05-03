@@ -1,10 +1,11 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
+                          User/OS Systick interface.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +32,28 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#include "ticks.h"
+#ifndef RETROS_CUSTOM_SYSTICK
+#include "../../base/systick.h"
+#endif
 
+
+#ifndef RETROS_CUSTOM_SYSTICK
+inline OS_Ticks OS_GetTicks ()
+{
+    return SYSTICK_Now ();
+}
+
+
+inline OS_Ticks OS_GetTickPeriod_us ()
+{
+    return SYSTICK_GetPeriod_us ();
+}
+
+
+void OS_SetTickHook (OS_TickHook schedulerTickHook)
+{
+    SYSTICK_SetHook (schedulerTickHook);
+}
+#endif

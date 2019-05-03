@@ -1,8 +1,5 @@
-
-    Copyright 2019 Santiago Germino (royconejo@gmail.com)
-
-    Contibutors:
-        {name/email}, {feature/bugfix}.
+/*
+    Copyright 2018 Santiago Germino (royconejo@gmail.com)
 
     RETRO-CIAA™ Library
 
@@ -31,4 +28,9 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
+
+
+extern const char *TEXT_REPLACEMENTCHAR;
 

@@ -1,10 +1,11 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
+                          Mutex object.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +32,20 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
 
+#include "api.h"
+#include "../base/semaphore.h"
+
+
+struct OS_MUTEX
+{
+    struct SEMAPHORE    sem;
+    void                *owner;
+};
+
+
+enum OS_Result  OS_MUTEX_Init       (struct OS_MUTEX *m);
+enum OS_Result  OS_MUTEX_Lock       (struct OS_MUTEX *m);
+enum OS_Result  OS_MUTEX_Unlock     (struct OS_MUTEX *m);

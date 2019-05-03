@@ -1,10 +1,10 @@
-
-    Copyright 2019 Santiago Germino (royconejo@gmail.com)
+/*
+    Copyright 2018 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Stream function prototypes.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,11 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
+#include <stdint.h>
+#include <stdbool.h>
 
+
+typedef uint32_t (* STREAM_ByteInFunc)  (void *handler);
+typedef bool     (* STREAM_ByteOutFunc) (void *handler, uint8_t byte);

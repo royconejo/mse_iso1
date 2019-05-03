@@ -1,10 +1,10 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - 8 byte aligned static memory pool.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,28 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
 
+
+#include "queue.h"
+#include "attr.h"
+#include <stdint.h>
+#include <stdbool.h>
+
+
+struct MEMPOOL
+{
+    uint32_t            baseAddr;
+    uint32_t            size;
+    uint32_t            used;
+    struct QUEUE        blocks;
+};
+
+
+bool        MEMPOOL_Init            (struct MEMPOOL *m, uint32_t baseAddr,
+                                     uint32_t size);
+void *      MEMPOOL_Block           (struct MEMPOOL *m, uint32_t blockSize,
+                                     const char *description);
+uint32_t    MEMPOOL_BlockSize       (void *b);
+uint32_t    MEMPOOL_Available       (struct MEMPOOL *m);

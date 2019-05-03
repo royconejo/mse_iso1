@@ -1,10 +1,11 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Preemtive multitasking Operating System (ReTrOS™).
+                          Scheduler functions.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +32,15 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
 
+#include "api.h"
+
+
+enum OS_Result  OS_SchedulerCallPending             ();
+void            OS_SchedulerTickCallback            (OS_Ticks ticks);
+
+enum OS_Result  OS_SchedulerTickBarrier__ACTIVATE   ();
+enum OS_Result  OS_SchedulerTickBarrier__CHECK      ();
+enum OS_Result  OS_SchedulerTickBarrier__CLEAR      ();

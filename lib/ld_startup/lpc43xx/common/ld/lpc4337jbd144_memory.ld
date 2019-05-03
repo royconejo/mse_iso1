@@ -1,10 +1,10 @@
-
-    Copyright 2019 Santiago Germino (royconejo@gmail.com)
+/*
+    Copyright 2018 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - LD Script: Cortex-M0/M4 shared memory map.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,15 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+__start_RamLoc40_framebuffer    = 0x10080000;
+__top_RamLoc40_framebuffer      = __start_RamLoc40_framebuffer + 0x9000;
+g_framebufferA                  = __start_RamLoc40_framebuffer;
 
+__start_RamAHB_framebuffer      = 0x20000000;
+__top_RamAHB_framebuffer        = __start_RamAHB_framebuffer + 0x9000;
+g_framebufferB                  = __start_RamAHB_framebuffer;
+
+__start_RamAHB_exchange         = 0x2000ffe0;
+__top_RamAHB_exchange           = __start_RamAHB_exchange + 0x20;
+g_vdrvExchange                  = __start_RamAHB_exchange;

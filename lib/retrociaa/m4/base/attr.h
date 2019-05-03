@@ -1,10 +1,10 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Compiler attributes and utilities.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,16 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
 
+#include <stdint.h>
+
+
+#define ATTR_EnumForceUint32(s)     s ## __FORCE32 = ((uint32_t) - 1)
+#define ATTR_NeverReturn            __attribute__((noreturn))
+#define ATTR_DataAlign4             __attribute__ ((aligned (4)))
+#define ATTR_DataAlign8             __attribute__ ((aligned (8)))
+
+uint32_t    ATTR_RoundTo4   (uint32_t size);
+uint32_t    ATTR_RoundTo8   (uint32_t size);

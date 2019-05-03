@@ -1,10 +1,10 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - Semaphore object and functions.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,86 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#include "semaphore.h"
+#include "debug.h"
+#include "chip.h"       // CMSIS
+#include <string.h>
 
+
+bool SEMAPHORE_Init (struct SEMAPHORE *s, uint32_t resources,
+                     uint32_t available)
+{
+    if (!s || !resources || available > resources)
+    {
+        return false;
+    }
+
+    memset (s, 0, sizeof(struct SEMAPHORE));
+
+    s->resources    = resources;
+    s->available    = available;
+
+    return true;
+}
+
+
+bool SEMAPHORE_Acquire (struct SEMAPHORE *s)
+{
+    if (!s)
+    {
+        return false;
+    }
+
+    uint32_t value = __LDREXW (&s->available);
+
+    if (value == 0)
+    {
+        return false;
+    }
+
+    -- value;
+
+    if (__STREXW (value, &s->available))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+
+bool SEMAPHORE_Release (struct SEMAPHORE *s)
+{
+    if (!s)
+    {
+        return false;
+    }
+
+    uint32_t value = __LDREXW (&s->available);
+
+    if (value + 1 > s->resources)
+    {
+        return false;
+    }
+
+    ++ value;
+
+    if (__STREXW (value, &s->available))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+
+uint32_t SEMAPHORE_Available (struct SEMAPHORE *s)
+{
+    if (!s)
+    {
+        return 0;
+    }
+
+    return __LDREXW (&s->available);
+}

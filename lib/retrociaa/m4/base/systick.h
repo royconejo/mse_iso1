@@ -1,10 +1,10 @@
-
+/*
     Copyright 2019 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - SYSTICK functions and event handler.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,17 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
 
+#include <stdint.h>
+
+
+typedef uint64_t    SYSTICK_Ticks;
+typedef void        (*SYSTICK_HookFunc) (SYSTICK_Ticks ticks);
+
+void                SYSTICK_SetPeriod_us    (SYSTICK_Ticks us);
+void                SYSTICK_SetPeriod_ms    (SYSTICK_Ticks ms);
+SYSTICK_Ticks       SYSTICK_GetPeriod_us    ();
+SYSTICK_Ticks       SYSTICK_Now             ();
+SYSTICK_HookFunc    SYSTICK_SetHook         (SYSTICK_HookFunc func);

@@ -1,10 +1,10 @@
-
-    Copyright 2019 Santiago Germino (royconejo@gmail.com)
+/*
+    Copyright 2018 Santiago Germino (royconejo@gmail.com)
 
     Contibutors:
         {name/email}, {feature/bugfix}.
 
-    RETRO-CIAA™ Library
+    RETRO-CIAA™ Library - UART portable basic functions.
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +31,15 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
+#include "uart.h"
 
+
+#define UART_EOF    0xFFFFFFFF
+
+
+bool        UART_Config     (struct UART *ctx, uint32_t baudRate);
+// Get and Put conform to STREAM_ByteIn/Out prototypes
+uint32_t    UART_GetByte    (void *handler);
+bool        UART_PutByte    (void *handler, uint8_t byte);

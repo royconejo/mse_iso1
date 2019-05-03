@@ -1,10 +1,6 @@
-
-    Copyright 2019 Santiago Germino (royconejo@gmail.com)
-
-    Contibutors:
-        {name/email}, {feature/bugfix}.
-
+/*
     RETRO-CIAA™ Library
+    Copyright 2018 Santiago Germino (royconejo@gmail.com)
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -31,4 +27,28 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+*/
+#pragma once
+#include "term.h"
 
+
+#define TEXSTYLE_NL             "\r\n"
+#define TEXSTYLE_PREFIX_INFO    "░░ "
+#define TEXSTYLE_PREFIX_WARNING "▓▓ "
+#define TEXSTYLE_PREFIX_ERROR   "▓▓ "
+#define TEXSTYLE_PREFIX_GROUP   " ░ "
+
+#define TEXSTYLE_INFO_BEGIN     TEXSTYLE_PREFIX_INFO
+#define TEXSTYLE_INFO_END       TEXSTYLE_NL
+#define TEXSTYLE_INFO(s)        TEXSTYLE_INFO_BEGIN s TEXSTYLE_INFO_END
+
+#define TEXSTYLE_COLOR_BEGIN(c) TERM_FG_COLOR_##c \
+                                TEXSTYLE_PREFIX_ERROR
+#define TEXSTYLE_COLOR_END      TERM_NO_COLOR \
+                                TEXSTYLE_NL
+#define TEXSTYLE_COLOR(c,s)     TEXSTYLE_COLOR_BEGIN(c) s TEXSTYLE_COLOR_END
+
+#define TEXSTYLE_WARNING(s)     TEXSTYLE_COLOR(BROWN,s)
+#define TEXSTYLE_ERROR(s)       TEXSTYLE_COLOR(RED,s)
+#define TEXSTYLE_OK(s)          TEXSTYLE_COLOR(BOLD_GREEN,s)
+#define TEXSTYLE_CRITICAL(s)    TEXSTYLE_COLOR(BOLD_RED,s)
