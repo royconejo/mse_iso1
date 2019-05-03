@@ -1,5 +1,4 @@
-# Implementacion de Sistemas Operativos.
-## MSE 4ta cohorte, 2019.
+# Implementacion de Sistemas Operativos. MSE 4ta cohorte, 2019.
 ## Santiago Germino.
 
 ### Compilación
