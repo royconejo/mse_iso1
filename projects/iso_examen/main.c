@@ -49,7 +49,15 @@ OS_TaskRetVal taskInput (OS_TaskParam arg)
             // Y cede el procesador.
             OS_TaskYield ();
         }
-        else
+        // Fall/Rise de B1 sin Fall de B2 o viceversa resetea las mediciones
+        else if ((B1RF && ad->measurements.b2.fall == OS_TicksUndefined) ||
+                 (B2RF && ad->measurements.b1.fall == OS_TicksUndefined))
+        {
+            measurementsRestart (&ad->measurements);
+            // Demora periodica de 40 milisegundos.
+            r = OS_TaskPeriodicDelay (40);
+        }
+        else 
         {
             // Demora periodica de 40 milisegundos.
             r = OS_TaskPeriodicDelay (40);
