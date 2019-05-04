@@ -6,14 +6,13 @@
 Desde directorio raíz del repositorio:
 
 ```shell
-$ cd projects/iso-examen
 $ make
 ```
 
 Para compilar y subir firmware a la EDU-CIAA-NXP:
 
 ```shell
-$ make flash
+$ make download
 ```
 
 ### Uso
